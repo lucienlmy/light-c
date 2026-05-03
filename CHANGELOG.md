@@ -4,6 +4,28 @@
 
 ---
 
+## v2.4.1 (2026-05-03)
+
+### 系统瘦身 — 严重缺陷修复
+
+- **[CRITICAL] 扫描卡死修复**：`get_status()` 改为异步并发架构，DISM 组存储分析移至 `spawn_blocking` 独立线程 + 30s 超时兜底，不再阻塞主线程导致前端假死
+- **[BUG] 休眠状态检测错误**：放弃解析 `powercfg /a` 输出（GBK 编码导致中文字符乱码），改用注册表 `HKLM\System\CurrentControlSet\Control\Power\HibernateEnabled` 直接读取，瞬时完成、编码无关、100% 准确
+- 三项检测（休眠 / WinSxS / 虚拟内存）改为 `tokio::join!` 并发执行，总耗时从 2 分钟降至 1-3 秒
+
+### 自动更新 — 体验优化
+
+- **手动检查即时反馈**：点击「检查更新」按钮后立即弹出 loading 弹窗，不再等到结果返回
+- **启动自动检查静默失败**：自动检查出错不再弹窗打扰用户，仅 console 记录
+- **native-tls 兼容**：updater 插件启用 Windows 原生 TLS（SChannel），解决 rustls 证书/代理兼容性问题
+- **重试逻辑修复**：`handleRetry` 使用 `sourceRef` 跟踪触发来源，重试时行为一致
+
+### 工程改进
+
+- GitHub Actions 新增绿色版（Portable）ZIP 包自动上传
+- `release.yml` 优化 Release 说明，包含完整下载链接和安装指引
+
+---
+
 ## v2.4.0 (2026-05-01)
 
 ### 自动更新 — 新功能

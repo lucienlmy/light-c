@@ -46,7 +46,6 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Tauri 签名密钥（需要在 GitHub Secrets 中配置）
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
@@ -54,13 +53,86 @@ jobs:
           releaseName: 'LightC v__VERSION__'
           releaseBody: |
             ## 更新内容
-            请查看 [CHANGELOG](https://github.com/Chunyu33/light-c/blob/main/CHANGELOG.md) 了解详细更新内容。
-            
-            - **首次安装提示**：
-            - Windows 可能会弹出“已保护你的电脑”或“Windows 安全”警告，这是因为应用暂未进行代码签名导致的**正常现象**。
-            - 请点击 **“更多信息”** → **“仍要安装”**（或“仍要运行”）即可继续安装。
-            - 安装过程中可能需要**管理员权限**，请允许后继续。
-            - Windows 的安全提示是新应用常见的保护机制，随着使用用户增多，后续版本的警告会逐渐减少。
+
+            请查看 [更新日志](https://github.com/Chunyu33/light-c/blob/main/CHANGELOG.md) 了解详细版本变更。
+
+            ### 下载
+
+            | 版本 | 说明 |
+            |------|------|
+            | **LightC_x64_Setup.exe** | NSIS 安装版（推荐），自动创建桌面快捷方式 |
+            | **LightC_x64_Installer.msi** | MSI 安装版，适合企业批量部署 |
+            | **LightC_portable_x64.zip** | 绿色便携版，解压即用，无需安装 |
+
+            ### 安装提示
+
+            - Windows 可能弹出「已保护你的电脑」警告，这是新应用代码签名策略导致的**正常现象**
+            - 请点击 **「更多信息」** → **「仍要运行」** 即可继续
+            - 部分功能需要**管理员权限**，建议右键选择「以管理员身份运行」
+            - 绿色版不包含自动更新功能，推荐使用安装版以获取自动更新
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: true
+
+      # tauri-action 已创建 Release 并上传了 MSI + NSIS 安装包
+      # 以下额外打包绿色便携版并上传到同一个 Release
+
+      - name: Create portable package
+        shell: pwsh
+        run: |
+          $ReleaseDir = "src-tauri\target\release"
+          $PortableDir = "portable_temp"
+          $ZipName = "LightC_portable_x64.zip"
+
+          Write-Host "Creating portable package..." -ForegroundColor Cyan
+
+          New-Item -ItemType Directory -Path $PortableDir -Force | Out-Null
+
+          # 主程序
+          if (-not (Test-Path "$ReleaseDir\LightC.exe")) {
+            Write-Host "Error: LightC.exe not found" -ForegroundColor Red
+            exit 1
+          }
+          Copy-Item "$ReleaseDir\LightC.exe" $PortableDir -Force
+          Write-Host "  Copied: LightC.exe" -ForegroundColor White
+
+          # DLL 文件
+          $DllFiles = Get-ChildItem -Path $ReleaseDir -Filter "*.dll" -ErrorAction SilentlyContinue
+          if ($DllFiles) {
+            foreach ($dll in $DllFiles) {
+              Copy-Item $dll.FullName $PortableDir -Force
+              Write-Host "  Copied: $($dll.Name)" -ForegroundColor White
+            }
+          }
+
+          # resources 目录
+          if (Test-Path "$ReleaseDir\resources") {
+            Copy-Item "$ReleaseDir\resources" "$PortableDir\resources" -Recurse -Force
+            Write-Host "  Copied: resources/" -ForegroundColor White
+          }
+
+          # 压缩
+          Compress-Archive -Path "$PortableDir\*" -DestinationPath $ZipName -Force
+          Write-Host "  Created: $ZipName" -ForegroundColor Green
+
+          # 清理临时目录
+          Remove-Item $PortableDir -Recurse -Force
+
+          # 输出文件名供后续步骤使用
+          echo "portable_zip=$ZipName" >> $env:GITHUB_OUTPUT
+        id: portable
+
+      - name: Upload portable to release
+        shell: pwsh
+        run: |
+          $ZipPath = "LightC_portable_x64.zip"
+          if (Test-Path $ZipPath) {
+            Write-Host "Uploading $ZipPath to release..." -ForegroundColor Cyan
+            gh release upload ${{ github.ref_name }} $ZipPath --clobber
+            Write-Host "Upload done!" -ForegroundColor Green
+          } else {
+            Write-Host "Error: $ZipPath not found" -ForegroundColor Red
+            exit 1
+          }
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
