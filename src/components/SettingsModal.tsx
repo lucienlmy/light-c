@@ -647,22 +647,27 @@ function GuideSettings() {
               大目录分析
             </p>
             <p className="text-xs text-[var(--text-muted)] leading-relaxed pl-6">
-              通过<span className="text-[var(--brand-green)] font-medium">语义识别技术</span>深度分析 AppData 目录，智能识别占用空间最大的文件夹。
-              系统会自动标记<span className="text-[var(--color-warning)] font-medium">程序缓存</span>和<span className="text-[var(--color-danger)] font-medium">潜在风险项</span>，
-              帮助您快速定位 C 盘空间的"元凶"，精准释放磁盘空间。
+              双模式扫描引擎：<span className="text-[var(--brand-green)] font-medium">默认模式</span>深度分析 AppData 目录（快速定位用户数据热点），
+              <span className="text-[var(--brand-green)] font-medium">深度扫描模式</span>覆盖 C 盘全部一级目录（全盘摸排）。
+              扫描自动标记<span className="text-[var(--color-warning)] font-medium">临时缓存</span>和<span className="text-[var(--color-danger)] font-medium">系统保护</span>目录，辅助安全决策。
             </p>
             <p className="text-xs text-[var(--text-muted)] leading-relaxed pl-6 mt-2">
-              <span className="text-[var(--brand-green)] font-medium">智能下钻：</span>开启深度扫描后，当目录超过 <span className="font-medium">5GB</span> 且包含超过 <span className="font-medium">1000</span> 个文件时，
-              系统会自动分析其子目录结构，最多下钻 <span className="font-medium">3 层</span>，展示每层占用空间最大的前 3 个子目录，帮助您精准定位空间占用来源。
+              <span className="text-[var(--brand-green)] font-medium">树形层级展示：</span>结果以递归父子树呈现，渐进缩进 + L&#123;n&#125; 深度标签直观展示目录层级关系。
+              每层最多展开前 <span className="font-medium">3</span> 个最大子目录。展示深度可在<span className="text-[var(--brand-green)] font-medium">功能设置</span>中调节（2-5 层），
+              实际扫描深度固定为 6 层以确保覆盖率。
             </p>
             <p className="text-xs text-[var(--text-muted)] leading-relaxed pl-6 mt-2">
-              <span className="text-[var(--brand-green)] font-medium">无限下钻弹窗：</span>点击目录条目右侧的 <span className="font-medium">▶</span> 按钮，
-              将弹出<span className="text-[var(--brand-green)] font-medium">沉浸式下钻模态框</span>，支持无限层级深入探索子目录结构。
-              弹窗顶部显示完整路径面包屑导航，可快速回溯到任意层级；按 <span className="font-medium">ESC</span> 键可快速关闭弹窗。
+              <span className="text-[var(--brand-green)] font-medium">热点展开：</span>全盘扫描中，容器级大目录（
+              <span className="font-medium">&gt;20GB</span> 或系统保护目录）自动展开为子目录参与排名竞争，
+              避免 Windows、Program Files 等"不可操作"目录霸占排行榜。
             </p>
             <p className="text-xs text-[var(--text-muted)] leading-relaxed pl-6 mt-2">
-              <span className="text-[var(--color-danger)] font-medium">系统保护：</span>扫描会自动跳过 <span className="font-medium">C:\Windows</span>、<span className="font-medium">$Recycle.Bin</span>、<span className="font-medium">System Volume Information</span> 等系统级目录，
-              并将 <span className="font-medium">WinSxS</span>、<span className="font-medium">System32</span>、<span className="font-medium">DriverStore</span> 等标记为"不可操作"保护目录。这些目录由系统管理，用户无法安全清理，因此不参与排行榜竞争。
+              <span className="text-[var(--brand-green)] font-medium">无限下钻弹窗：</span>点击目录右侧 <span className="font-medium">▶</span> 按钮进入沉浸式模态框，
+              支持任意层级深入探索子目录结构。顶部完整路径面包屑导航可快速回溯，按 <span className="font-medium">ESC</span> 快速关闭。
+            </p>
+            <p className="text-xs text-[var(--text-muted)] leading-relaxed pl-6 mt-2">
+              <span className="text-[var(--brand-green)] font-medium">大小阈值：</span>可在<span className="text-[var(--brand-green)] font-medium">功能设置</span>中调节最低展示大小（10-500MB），
+              低于阈值的目录不显示，有效减少结果噪音。
             </p>
           </div>
           <div>

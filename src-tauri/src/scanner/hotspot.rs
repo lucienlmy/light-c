@@ -417,7 +417,8 @@ impl HotspotScanner {
                     return false;
                 }
                 let depth = calculate_relative_depth(&appdata_path, path);
-                depth > 0 && depth <= self.max_display_depth
+                // 多包含一层子节点，确保最后一层展示深度的条目也能显示子目录
+                depth > 0 && depth <= self.max_display_depth + 1
             })
             .map(|(path, stats)| {
                 let depth = calculate_relative_depth(&appdata_path, &path);
@@ -433,10 +434,11 @@ impl HotspotScanner {
             .filter(|(_, _, d)| *d == 1)
         {
             let mut entry = Self::build_entry(dir_path, dir_stats, *depth as u8, false);
+            // 多给一层深度，让末级条目也能构建子节点
             entry.children = Self::build_children_from_pairs(
                 dir_path,
                 2,
-                self.max_display_depth.max(3),
+                self.max_display_depth + 1,
                 &candidate_pairs,
             );
             top_entries.push(entry);
@@ -593,6 +595,7 @@ impl HotspotScanner {
             self.top_n,
             &c_drive,
             true,
+            self.size_threshold, // 使用用户配置的阈值，非硬编码 50MB
         );
 
         // 对结果条目填充子目录（用于树形展示）
@@ -1261,11 +1264,13 @@ fn should_expand_directory(entry: &HotspotEntry) -> bool {
 }
 
 /// 从缓存中查找目录的直接子目录（已排序，已过滤噪音）
+/// `min_size` 使用用户配置的大小阈值，而非硬编码的 50MB
 fn find_meaningful_children(
     dir: &Path,
     cache: &HashMap<PathBuf, FolderStats>,
     c_drive: &Path,
     is_full_scan: bool,
+    min_size: u64,
 ) -> Vec<HotspotEntry> {
     let mut children: Vec<HotspotEntry> = Vec::new();
 
@@ -1281,7 +1286,7 @@ fn find_meaningful_children(
             }
 
             if let Some(stats) = cache.get(&sub_path) {
-                if stats.total_size >= MIN_SIZE_THRESHOLD {
+                if stats.total_size >= min_size {
                     let depth = calculate_relative_depth(c_drive, &sub_path);
                     children.push(HotspotScanner::build_entry(
                         &sub_path, stats, depth as u8, is_full_scan,
@@ -1333,6 +1338,7 @@ fn flatten_hotspots(
     top_n: usize,
     c_drive: &Path,
     is_full_scan: bool,
+    min_size: u64,
 ) -> Vec<HotspotEntry> {
     // 过滤掉噪音目录，放入 BinaryHeap（大顶堆，O(log n) 操作）
     let mut candidates: BinaryHeap<SizeOrd> = all_entries
@@ -1350,7 +1356,7 @@ fn flatten_hotspots(
 
         if should_expand_directory(&entry) {
             let dir_path = PathBuf::from(&entry.path);
-            let children = find_meaningful_children(&dir_path, cache, c_drive, is_full_scan);
+            let children = find_meaningful_children(&dir_path, cache, c_drive, is_full_scan, min_size);
 
             if children.is_empty() {
                 if seen.insert(dir_path) {

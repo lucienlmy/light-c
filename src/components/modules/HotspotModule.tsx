@@ -108,6 +108,9 @@ interface HotspotItemProps {
 }
 
 function HotspotItem({ entry, rank, maxSize, isFullScan, onOpenFolder, onCleanup, onSearch, parentName, isChild, treeDepth = 0, onDrillDown }: HotspotItemProps) {
+  const { settings } = useSettings();
+  // 根据用户设置的展示深度动态控制树形展开层数：treeDepth 0 为顶级，settings.hotspotDepth 限制最多展示层数
+  const maxTreeDepth = settings.hotspotDepth;
   // 计算占比条宽度
   const percentage = maxSize > 0 ? (entry.total_size / maxSize) * 100 : 0;
   
@@ -117,9 +120,9 @@ function HotspotItem({ entry, rank, maxSize, isFullScan, onOpenFolder, onCleanup
   // 生成路径简写：父目录 > 子目录
   const displayName = parentName ? `${parentName} > ${entry.name}` : entry.name;
   
-  // 树形结构渐进缩进：每层递进 24px，最多展示 3 层
+  // 树形结构渐进缩进：每层递进 24px，随用户设置的深度动态调整上限
   const indentStyle = treeDepth > 0
-    ? { paddingLeft: `${Math.min(treeDepth, 3) * 24}px`, borderLeft: '2px solid var(--border-color)' }
+    ? { paddingLeft: `${Math.min(treeDepth, maxTreeDepth) * 24}px`, borderLeft: '2px solid var(--border-color)' }
     : {};
 
   return (
@@ -279,7 +282,7 @@ function HotspotItem({ entry, rank, maxSize, isFullScan, onOpenFolder, onCleanup
       </div>
       
       {/* 递归渲染子目录 — 最多展示 3 层树形结构 */}
-      {treeDepth < 3 && entry.children && entry.children.length > 0 && (
+      {treeDepth < maxTreeDepth - 1 && entry.children && entry.children.length > 0 && (
         <div className="mt-1 space-y-1">
           {entry.children.map((child, idx) => (
             <HotspotItem

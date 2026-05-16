@@ -808,6 +808,7 @@ export async function scanHotspot(
   maxDepth?: number,
   sizeThresholdMb?: number,
 ): Promise<HotspotScanResult> {
+  console.log('[scanHotspot] JS 调用参数:', { topN, fullScan, maxDepth, sizeThresholdMb });
   return invoke<HotspotScanResult>('scan_hotspot', { topN, fullScan, maxDepth, sizeThresholdMb });
 }
 
