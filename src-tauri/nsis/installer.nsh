@@ -69,8 +69,12 @@ LangString MSG_ALREADY_RUNNING ${LANG_ENGLISH} "LightC is currently running. Ple
 ; 4. 自定义函数
 ; ============================================================================
 
-; 创建桌面快捷方式
+; 创建桌面快捷方式（更新模式下跳过，由生成的 CreateOrUpdateDesktopShortcut 处理）
 Function CreateDesktopShortcut
+    ; 更新模式下不重复创建快捷方式
+    ${If} $UpdateMode = 1
+        Return
+    ${EndIf}
     CreateShortCut "$DESKTOP\LightC.lnk" "$INSTDIR\LightC.exe" "" "$INSTDIR\LightC.exe" 0
 FunctionEnd
 
@@ -111,7 +115,11 @@ Function un.onInit
     notRunning:
 FunctionEnd
 
-; 卸载时删除桌面快捷方式
+; 卸载时删除桌面快捷方式（更新模式下跳过，避免误删后无法重建）
 Function un.onUninstSuccess
+    ; 更新模式下不删除快捷方式
+    ${If} $UpdateMode = 1
+        Return
+    ${EndIf}
     Delete "$DESKTOP\LightC.lnk"
 FunctionEnd
