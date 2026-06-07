@@ -544,8 +544,18 @@ export function HotspotModule() {
       {moduleState.status === 'scanning' && (
         <div className="flex flex-col items-center justify-center py-12 text-[var(--text-muted)]">
           <Loader2 className="w-8 h-8 animate-spin text-[var(--brand-green)] mb-3" />
-          <p className="text-sm">
+          <p className="text-sm flex items-center gap-2">
             {fullScanEnabled ? '正在全盘扫描 C 盘...' : '正在扫描 AppData 目录...'}
+            {/* 扫描引擎模式标签 — MFT 直读 vs 常规遍历 */}
+            {fullScanEnabled && scanProgress && (
+              <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                scanProgress.current_dir.includes('MFT')
+                  ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400'
+                  : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'
+              }`}>
+                {scanProgress.current_dir.includes('MFT') ? 'MFT 直读' : '常规遍历'}
+              </span>
+            )}
           </p>
           <p className="text-xs mt-1">
             {fullScanEnabled ? '深度扫描可能需要较长时间，请耐心等待' : '这可能需要几秒钟'}

@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "LightC",
-  "version": "2.4.5",
+  "version": "2.5.0",
   "identifier": "com.chunyu.LightC",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -66,7 +66,8 @@
       "endpoints": [
         "https://github.com/Chunyu33/light-c/releases/latest/download/latest.json"
       ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDg0MzRBOUEyQjMzRUIwNDkKUldSSnNENnpvcWswaEhSYTVoclEzaFFPbHlKZmRmOFhaam1ZaS9pK2sxTmZaclZXVmFjdDlCOG0K"
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDU3NEJFNkU1NzM3OEQyQTQKUldTazBuaHo1ZVpMVnpKbnUrSnUrWlpVakhKL1c5ZXV3ZXhYeW4wbFRSeVFyb01TZ0h2RGpsZFoK"
     }
   }
 }
+

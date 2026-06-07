@@ -7,6 +7,7 @@ mod categories;
 mod context_menu;
 mod file_info;
 mod hotspot;
+pub(crate) mod hotspot_engine;
 mod leftovers;
 mod programdata;
 mod programdata_cleaner;

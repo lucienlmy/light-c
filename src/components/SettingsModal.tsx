@@ -664,6 +664,13 @@ function GuideSettings() {
               扫描自动标记<span className="text-[var(--color-warning)] font-medium">临时缓存</span>和<span className="text-[var(--color-danger)] font-medium">系统保护</span>目录，辅助安全决策。
             </p>
             <p className="text-xs text-[var(--text-muted)] leading-relaxed pl-6 mt-2">
+              <span className="text-[var(--brand-green)] font-medium">MFT 直读引擎（v2.5 新特性）：</span>
+              以管理员身份运行时，深度扫描自动启用<span className="text-[var(--brand-green)] font-medium"> NTFS MFT 直读</span>技术，
+              绕开文件系统 API 直接读取主文件表，实现类似 WizTree 的<span className="text-[var(--brand-green)] font-medium">秒级全盘扫描</span>。
+              非管理员或非 NTFS 文件系统时自动降级为常规遍历，无需用户干预。
+              扫描中前端会显示当前使用的引擎类型（MFT 直读 / 常规遍历）。
+            </p>
+            <p className="text-xs text-[var(--text-muted)] leading-relaxed pl-6 mt-2">
               <span className="text-[var(--brand-green)] font-medium">树形层级展示：</span>结果以递归父子树呈现，渐进缩进 + L&#123;n&#125; 深度标签直观展示目录层级关系。
               每层最多展开前 <span className="font-medium">3</span> 个最大子目录。展示深度可在<span className="text-[var(--brand-green)] font-medium">功能设置</span>中调节（2-4 层），
               实际扫描深度固定为 6 层以确保覆盖率。
