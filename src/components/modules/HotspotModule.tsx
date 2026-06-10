@@ -331,6 +331,7 @@ export function HotspotModule() {
 
   // ====== 扫描进度状态（仅深度扫描时有效） ======
   const [scanProgress, setScanProgress] = useState<HotspotScanProgress | null>(null);
+  const [scanElapsed, setScanElapsed] = useState(0);
 
   // ====== 下钻模态框状态 ======
   /** 选中的路径：非空时弹出 DrillDownModal */
@@ -376,6 +377,14 @@ export function HotspotModule() {
       if (unlistenCancelled) unlistenCancelled();
     };
   }, []);
+
+  // 扫描计时器（仅在全盘扫描时显示）
+  useEffect(() => {
+    if (moduleState.status !== 'scanning') { setScanElapsed(0); return; }
+    const t0 = performance.now();
+    const interval = setInterval(() => setScanElapsed(Math.floor((performance.now() - t0) / 1000)), 500);
+    return () => clearInterval(interval);
+  }, [moduleState.status]);
 
   // 执行扫描
   const handleScan = useCallback(async () => {
@@ -550,8 +559,8 @@ export function HotspotModule() {
             {fullScanEnabled && scanProgress && (
               <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
                 scanProgress.current_dir.includes('MFT')
-                  ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400'
-                  : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'
+                  ? 'bg-[var(--brand-green-10)] text-[var(--brand-green)]'
+                  : 'bg-[var(--bg-hover)] text-[var(--text-muted)]'
               }`}>
                 {scanProgress.current_dir.includes('MFT') ? 'MFT 直读' : '常规遍历'}
               </span>
@@ -573,8 +582,14 @@ export function HotspotModule() {
                   {scanProgress.current_dir}
                 </span>
               </div>
-              <div className="text-xs text-[var(--text-faint)]">
-                已扫描 <span className="text-[var(--text-primary)] font-medium">{scanProgress.scanned_dirs.toLocaleString()}</span> 个目录
+              <div className="flex items-center justify-between text-xs text-[var(--text-faint)]">
+                <span>
+                {scanProgress.scanned_dirs > 0
+                  ? <>已扫描 <span className="text-[var(--text-primary)] font-medium">{scanProgress.scanned_dirs.toLocaleString()}</span> 个目录</>
+                  : <span className="animate-pulse">正在读取 NTFS 主文件表...</span>
+                }
+                </span>
+                {scanElapsed > 0 && fullScanEnabled && <span>{scanElapsed}s</span>}
               </div>
             </div>
           )}

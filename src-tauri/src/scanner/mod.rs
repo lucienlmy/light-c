@@ -3,6 +3,7 @@
 // ============================================================================
 
 pub(crate) mod big_files;
+pub(crate) mod big_files_engine;
 mod categories;
 mod context_menu;
 mod file_info;

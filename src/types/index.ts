@@ -150,6 +150,8 @@ export interface LargeFileScanProgress {
   scanned_count: number;
   /** 当前 Top N 已收集的文件数 */
   found_count: number;
+  /** 扫描引擎: "mft" | "walkdir" */
+  backend: string;
 }
 
 /** 应用状态 */

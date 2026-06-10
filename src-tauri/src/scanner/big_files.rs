@@ -49,6 +49,9 @@ pub struct LargeFileScanProgress {
     pub current_path: String,
     pub scanned_count: u64,
     pub found_count: usize,
+    /// 扫描引擎标识: "mft" / "walkdir"
+    #[serde(default)]
+    pub backend: String,
 }
 
 // ============================================================================
@@ -77,6 +80,107 @@ pub fn scan(window: &Window, top_n: usize) -> Result<Vec<LargeFileEntry>, String
 
         log::info!("开始扫描大文件: {} (Top {})", root, top_n);
 
+        // ========================================================================
+        // 尝试 MFT V3 直读引擎（管理员 + NTFS 时秒级完成）
+        // ========================================================================
+        {
+            use crate::scanner::big_files_engine::mft_core;
+            let drive_letter = system_drive.chars().next().unwrap_or('C');
+            let is_admin = mft_core::is_elevated();
+            let is_ntfs_drive = mft_core::is_ntfs(drive_letter);
+
+            // 临时加这行
+            eprintln!(">>> is_admin={} is_ntfs={}", is_admin, is_ntfs_drive);
+
+            // 通过 progress event 告知前端 MFT 状态（release 无控制台）
+            let _ = window.emit(
+                "large-file-scan:progress",
+                LargeFileScanProgress {
+                    current_path: format!(
+                        "管理员:{}, NTFS:{}, 引擎:{}",
+                        if is_admin { "是" } else { "否" },
+                        if is_ntfs_drive { "是" } else { "否" },
+                        if is_admin && is_ntfs_drive { "MFT" } else { "常规" }
+                    ),
+                    scanned_count: 0,
+                    found_count: 0,
+                    backend: if is_admin && is_ntfs_drive { "mft".into() } else { "walkdir".into() },
+                },
+            );
+            if is_admin && is_ntfs_drive {
+                log::info!("[BigFiles] 尝试 MFT V3 直读引擎...");
+                let _ = window.emit(
+                    "large-file-scan:progress",
+                    LargeFileScanProgress {
+                        current_path: "正在初始化 MFT 直读引擎...".into(),
+                        scanned_count: 0,
+                        found_count: 0,
+                        backend: "mft".into(),
+                    },
+                );
+
+                match crate::scanner::big_files_engine::mft_bigfiles::scan_top_files_via_mft(
+                    top_n,
+                    |processed| {
+                        let _ = window.emit(
+                            "large-file-scan:progress",
+                            LargeFileScanProgress {
+                                current_path: format!(
+                                    "MFT 直读扫描中... 已处理 {} 条记录",
+                                    processed
+                                ),
+                                scanned_count: processed as u64,
+                                found_count: 0,
+                                backend: "mft".into(),
+                            },
+                        );
+                    },
+                ) {
+                    Ok(results) if !results.is_empty() => {
+                        log::info!(
+                            "[BigFiles] MFT 扫描完成，返回 {} 个文件",
+                            results.len()
+                        );
+                        let _ = window.emit(
+                            "large-file-scan:progress",
+                            LargeFileScanProgress {
+                                current_path: "MFT 扫描完成，正在生成结果...".into(),
+                                scanned_count: results.len() as u64,
+                                found_count: results.len(),
+                                backend: "mft".into(),
+                            },
+                        );
+                        return Ok(results);
+                    }
+                    Ok(_empty) => {
+                        let _ = window.emit(
+                            "large-file-scan:progress",
+                            LargeFileScanProgress {
+                                current_path: "MFT 返回空结果，降级到常规扫描...".into(),
+                                scanned_count: 0,
+                                found_count: 0,
+                                backend: "walkdir".into(),
+                            },
+                        );
+                    }
+                    Err(e) => {
+                        let _ = window.emit(
+                            "large-file-scan:progress",
+                            LargeFileScanProgress {
+                                current_path: format!("MFT 失败: {}，降级到常规扫描...", e),
+                                scanned_count: 0,
+                                found_count: 0,
+                                backend: "walkdir".into(),
+                            },
+                        );
+                    }
+                }
+            }
+        }
+
+        // ========================================================================
+        // 降级：WalkDir 遍历（原有方案）
+        // ========================================================================
         let mut heap: BinaryHeap<Reverse<LargeFileEntry>> = BinaryHeap::new();
         let mut file_count: u64 = 0;
         let mut last_emit = Instant::now();
@@ -135,6 +239,7 @@ pub fn scan(window: &Window, top_n: usize) -> Result<Vec<LargeFileEntry>, String
                         current_path: path_str.clone(),
                         scanned_count: file_count,
                         found_count: heap.len(),
+                        backend: "walkdir".into(),
                     };
                     let _ = window.emit("large-file-scan:progress", &progress);
                     last_emit = Instant::now();
@@ -186,7 +291,7 @@ pub fn scan(window: &Window, top_n: usize) -> Result<Vec<LargeFileEntry>, String
 /// 3 = 中等风险 (数据库/文档)
 /// 4 = 较高风险 (程序文件/Windows 非 Temp)
 /// 5 = 系统关键 (System32/驱动/页面文件)
-fn compute_file_risk_level(path: &str) -> u8 {
+pub(crate) fn compute_file_risk_level(path: &str) -> u8 {
     let lower = path.to_lowercase();
     let file_name = std::path::Path::new(path)
         .file_name()
@@ -270,7 +375,7 @@ fn compute_file_risk_level(path: &str) -> u8 {
 }
 
 /// 根据文件路径识别来源标签
-fn compute_source_label(path: &str) -> String {
+pub(crate) fn compute_source_label(path: &str) -> String {
     let lower = path.to_lowercase();
     let file_name = std::path::Path::new(path)
         .file_name()

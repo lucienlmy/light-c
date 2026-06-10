@@ -26,6 +26,8 @@ export function BigFilesModule() {
 
   // 防止重复扫描
   const scanningRef = useRef(false);
+  // 扫描开始时间
+  const scanStartRef = useRef(0);
   // 用于跟踪是否已处理过当前的一键扫描触发
   const lastScanTriggerRef = useRef(0);
 
@@ -33,7 +35,9 @@ export function BigFilesModule() {
   const [files, setFiles] = useState<LargeFileEntry[]>([]);
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
   const [currentPath, setCurrentPath] = useState('');
+  const [scanBackend, setScanBackend] = useState(''); // "mft" | "walkdir"
   const [scannedCount, setScannedCount] = useState(0);
+  const [scanElapsed, setScanElapsed] = useState(0);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
@@ -43,9 +47,16 @@ export function BigFilesModule() {
 
     const setupListener = async () => {
       unlisten = await listen<LargeFileScanProgress>('large-file-scan:progress', (event) => {
-        const { current_path, scanned_count } = event.payload;
+        const { current_path, scanned_count, backend } = event.payload;
         setCurrentPath(current_path);
         setScannedCount(scanned_count);
+        // 只升级不降级：一旦检测到 mft 就锁定
+        if (backend) {
+          setScanBackend(prev => {
+            if (prev === 'mft') return 'mft';
+            return backend;
+          });
+        }
       });
     };
 
@@ -58,6 +69,17 @@ export function BigFilesModule() {
     };
   }, []);
 
+  // 扫描计时器
+  useEffect(() => {
+    if (moduleState.status !== 'scanning') { setScanElapsed(0); return; }
+    const interval = setInterval(() => {
+      if (scanStartRef.current > 0) {
+        setScanElapsed(Math.floor((performance.now() - scanStartRef.current) / 1000));
+      }
+    }, 200);
+    return () => clearInterval(interval);
+  }, [moduleState.status]);
+
   // 开始扫描 (带防抖 — scanningRef 防止重复触发)
   const handleScan = useCallback(async () => {
     if (scanningRef.current) return;
@@ -66,7 +88,10 @@ export function BigFilesModule() {
     updateModuleState('bigFiles', { status: 'scanning', error: null });
     setFiles([]);
     setCurrentPath('');
+    setScanBackend('');
     setScannedCount(0);
+    setScanElapsed(0);
+    scanStartRef.current = performance.now();
     setSelectedFiles(new Set());
 
     try {
@@ -313,11 +338,25 @@ export function BigFilesModule() {
       >
         {/* 展开内容 */}
         <div>
-          {/* 扫描进度提示 */}
-          {isScanning && currentPath && (
-            <div className="px-4 py-2 bg-emerald-500/5 border-b border-[var(--border-default)] text-xs text-[var(--fg-muted)] truncate flex items-center gap-4">
-              <span className="truncate">正在扫描: {currentPath}</span>
+          {/* 扫描进度 + 引擎 + 时长（扫描中 & 扫描完成后都显示） */}
+          {(isScanning || scanBackend) && currentPath && (
+            <div className={`px-4 py-2 border-b border-[var(--border-default)] text-xs truncate flex items-center gap-3 ${
+              scanBackend === 'mft' ? 'bg-[var(--brand-green-10)]' : 'bg-emerald-500/5'
+            }`}>
+              <span className="truncate text-[var(--fg-muted)]">{isScanning ? '正在扫描:' : '扫描完成:'} {currentPath}</span>
+              {scanBackend && (
+                <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                  scanBackend === 'mft'
+                    ? 'bg-[var(--brand-green)] text-white'
+                    : 'bg-[var(--bg-hover)] text-[var(--text-muted)]'
+                }`}>
+                  {scanBackend === 'mft' ? '⚡ MFT 混合扫描' : '常规'}
+                </span>
+              )}
               <span className="shrink-0 text-[var(--fg-faint)]">{scannedCount.toLocaleString()} 文件</span>
+              {isScanning && scanElapsed > 0 && (
+                <span className="shrink-0 text-[var(--fg-faint)]">{scanElapsed}s</span>
+              )}
             </div>
           )}
 
@@ -338,8 +377,20 @@ export function BigFilesModule() {
               <div className="w-14 h-14 bg-emerald-500/10 rounded-2xl flex items-center justify-center mb-3">
                 <Loader2 className="w-7 h-7 text-emerald-500 animate-spin" />
               </div>
-              <p className="text-sm font-medium text-[var(--fg-secondary)]">正在扫描中...</p>
-              <p className="text-xs text-[var(--fg-muted)] mt-1">正在遍历系统盘文件，请稍候</p>
+              {/* 扫描引擎模式 — 居中醒目展示 */}
+              {scanBackend === 'mft' && (
+                <span className="mb-2 px-3 py-1 rounded-full text-xs font-semibold bg-[var(--brand-green-10)] text-[var(--brand-green)] border border-[var(--brand-green-20)]">
+                  ⚡ MFT 混合扫描
+                </span>
+              )}
+              <p className="text-sm font-medium text-[var(--fg-secondary)]">
+                {scanBackend === 'mft' ? 'MFT加速模式扫描系统盘...'
+                  : scanBackend === 'walkdir' ? '正在遍历系统盘文件...'
+                  : '正在扫描中...'}
+              </p>
+              <p className="text-xs text-[var(--fg-muted)] mt-1">
+                扫描引擎: {scanBackend || '检测中...'}
+              </p>
             </div>
           )}
 

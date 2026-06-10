@@ -519,7 +519,7 @@ impl HotspotScanner {
                     let _ = app.emit(
                         "hotspot-scan:progress",
                         HotspotScanProgress {
-                            current_dir: "正在初始化 MFT 直读引擎...".into(),
+                            current_dir: "MFT 直读引擎已就绪，正在读取主文件表...".into(),
                             scanned_dirs: 0,
                             found_entries: 0,
                             total_size: 0,
@@ -541,10 +541,14 @@ impl HotspotScanner {
                             let _ = app.emit(
                                 "hotspot-scan:progress",
                                 HotspotScanProgress {
-                                    current_dir: format!(
-                                        "MFT 直读扫描中... 已处理 {} 条记录",
-                                        processed
-                                    ),
+                                    current_dir: if processed == 0 {
+                                        "MFT 直读引擎已就绪，正在读取主文件表...".into()
+                                    } else {
+                                        format!(
+                                            "MFT 直读扫描中... 已处理 {} 条记录",
+                                            processed
+                                        )
+                                    },
                                     scanned_dirs: processed,
                                     found_entries: 0,
                                     total_size: 0,

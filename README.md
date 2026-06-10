@@ -37,6 +37,8 @@
 - **虚拟列表优化**：大量文件列表也能流畅滚动
 
 ### 🔍 大文件清理
+- **MFT 混合扫描引擎**：管理员运行时自动启用 NTFS USN Journal 枚举 + 并行文件大小检测，扫描速度从 30-60 秒降至 10 秒内；非管理员自动降级为原有方案，前端标注扫描模式
+- **智能路径过滤**：自动跳过系统目录和小文件扩展名，聚焦用户目录和程序目录中的大文件
 - **智能扫描**：遍历系统盘（自动检测盘符），用最小堆维护 Top N 最大文件
 - **可调扫描量**：支持自定义返回数量 (10-200，默认 50， 未接入前端)
 - **后端风险计算**：Rust 端基于路径规则计算风险等级 (1-5)，高风险文件前端锁定不可选
@@ -275,10 +277,14 @@ LightC/
 │   │   │   ├── scan_engine.rs        # 扫描引擎核心逻辑
 │   │   │   ├── social_scanner.rs     # 社交软件缓存扫描器
 │   │   │   ├── hotspot.rs            # 大目录分析（语义识别）
-│   │   │   ├── hotspot_engine/       #   扫描引擎集合
-│   │   │   │   ├── mft_scanner.rs    #     MFT 直读引擎（管理员）
+│   │   │   ├── mft_core.rs           #   MFT 共享核心（设备/USN/路径）
+│   │   │   ├── hotspot_engine/       #   大目录分析引擎集合
+│   │   │   │   ├── mft_scanner.rs    #     MFT 目录聚合
 │   │   │   │   ├── fallback_scanner.rs#     jwalk 降级方案
 │   │   │   │   └── engine_selector.rs#     引擎自动选择
+│   │   │   ├── big_files_engine/     #   大文件扫描引擎集合
+│   │   │   │   ├── mft_core.rs       #     MFT 枚举+路径重建
+│   │   │   │   └── mft_bigfiles.rs   #     USN+并行stat Top-N 扫描
 │   │   │   ├── leftovers.rs          # 卸载残留扫描（置信度评分引擎）
 │   │   │   ├── registry.rs           # 注册表残留扫描 (HKCR\Applications)
 │   │   │   ├── registry_scoring.rs    # 路径解析 / 存在性缓存 / 安全过滤

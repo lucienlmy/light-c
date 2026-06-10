@@ -53,9 +53,8 @@ jobs:
           releaseName: 'LightC v__VERSION__'
           releaseBody: |
             ## 更新内容
-            - 大目录分析新增 MFT 直读引擎，管理员运行时秒级全盘扫描
-            - 修复了回收站清理的问题
-            - 修复了卸载残留扫描的误报（WSL2、剪映/CapCut）
+            - 大文件清理模块性能大幅提升：管理员运行时扫描速度从 30-60 秒降至 10 秒内
+            - 大目录分析 MFT 直读体验优化
             请查看 [更新日志](https://github.com/Chunyu33/light-c/blob/main/CHANGELOG.md) 了解详细版本变更。
 
           releaseDraft: false
