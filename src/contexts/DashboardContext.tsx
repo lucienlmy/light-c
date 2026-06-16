@@ -4,7 +4,14 @@
 // ============================================================================
 
 import { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
-import { getDiskInfo, getHealthScore, HealthScoreResult } from '../api/commands';
+import {
+  cancelDiskGrowthScan,
+  cancelHotspotScan,
+  cancelLargeFileScan,
+  getDiskInfo,
+  getHealthScore,
+  HealthScoreResult,
+} from '../api/commands';
 import type { DiskInfo } from '../types';
 
 // ============================================================================
@@ -84,6 +91,8 @@ export interface DashboardContextValue {
   triggerOneClickScan: () => void;
   /** 停止所有扫描 */
   stopAllScans: () => void;
+  /** 全局停止触发器，模块用它丢弃被取消任务的异步返回。 */
+  stopScanTrigger: number;
 }
 
 // ============================================================================
@@ -141,6 +150,7 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
   const [healthRefreshTrigger, setHealthRefreshTrigger] = useState(0);
   // 一键扫描触发器
   const [oneClickScanTrigger, setOneClickScanTrigger] = useState(0);
+  const [stopScanTrigger, setStopScanTrigger] = useState(0);
 
   // 刷新磁盘信息
   const refreshDiskInfo = useCallback(async () => {
@@ -177,6 +187,12 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
 
   // 停止所有扫描
   const stopAllScans = useCallback(() => {
+    // 先通知支持取消的后端任务，避免 UI 已停止但 MFT/文件扫描仍在后台占用 IO。
+    void cancelLargeFileScan().catch(error => console.error('停止大文件扫描失败:', error));
+    void cancelHotspotScan().catch(error => console.error('停止大目录扫描失败:', error));
+    void cancelDiskGrowthScan().catch(error => console.error('停止 C 盘全盘分析失败:', error));
+    setStopScanTrigger(n => n + 1);
+
     // 将所有正在扫描的模块状态重置为 idle
     setModules(prev => {
       const newModules = { ...prev };
@@ -234,6 +250,7 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
     oneClickScanTrigger,
     triggerOneClickScan,
     stopAllScans,
+    stopScanTrigger,
   };
 
   return (

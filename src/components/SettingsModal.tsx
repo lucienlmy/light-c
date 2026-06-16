@@ -4,12 +4,14 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Settings, MessageSquare, Info, Sun, Moon, Monitor, ExternalLink, RefreshCw, CheckCircle, BookOpen, Shield, AlertTriangle, Cpu, HardDrive, Monitor as MonitorIcon, User, Clock, Zap, FileBox, MessageCircle, Layers, Package, Database, Code2, FolderOpen, History, ChevronRight, MonitorCog, Coffee, Copy, MousePointerClick, ShieldCheck, Rocket, HelpCircle, ClipboardList, ShieldAlert, Navigation, Trash2, SlidersHorizontal } from 'lucide-react';
+import { X, Settings, MessageSquare, Info, Sun, Moon, Monitor, ExternalLink, RefreshCw, CheckCircle, BookOpen, Shield, AlertTriangle, Cpu, HardDrive, Monitor as MonitorIcon, User, Clock, Zap, FileBox, MessageCircle, Layers, Package, Database, Code2, FolderOpen, History, ChevronRight, MonitorCog, Coffee, Copy, MousePointerClick, ShieldCheck, Rocket, HelpCircle, ClipboardList, ShieldAlert, Navigation, Trash2, SlidersHorizontal, Download } from 'lucide-react';
 import { Select, type SelectOption } from './ui/Select';
 
 // 赞赏码图片
 import wechatQr from '../assets/r_wechat_qr.jpg';
 import alipayQr from '../assets/r_alipay_qr.jpg';
+import binlockxIcon from '../assets/binlockx.svg';
+import viapIcon from '../assets/viap.svg';
 import { useTheme, type ThemeMode, useFontSize, FONT_SIZE_CONFIGS, type FontSizeLevel, useSettings } from '../contexts';
 import { useToast } from './Toast';
 import { Type } from 'lucide-react';
@@ -1171,7 +1173,7 @@ function AboutSettings() {
           更新日志
         </h4>
         <a
-          href="https://github.com/Chunyu33/light-c/blob/main/update-logs.md"
+          href="https://github.com/Chunyu33/light-c/blob/main/CHANGELOG.md"
           target="_blank"
           rel="noopener noreferrer"
           className="flex items-center justify-between p-4 rounded-2xl bg-[var(--bg-main)] hover:bg-[var(--bg-hover)] transition-colors group"
@@ -1189,11 +1191,71 @@ function AboutSettings() {
         </a>
       </div>
 
+      <MoreToolsSection />
+
       <div className="text-center pt-4">
         <p className="text-xs text-[var(--text-faint)]">
           Copyright &copy; {new Date().getFullYear()} LightC. All rights reserved.
         </p>
       </div>
+    </div>
+  );
+}
+
+// 更多工具推荐放在关于页底部，用轻量入口承接同作者的其他实用工具，不打断主设置流程。
+function MoreToolsSection() {
+  const tools = [
+    {
+      name: 'Viap',
+      icon: viapIcon,
+      description:
+        'Windows 应用存储重定向工具。通过目录/符号链接将 C 盘应用迁移到其他磁盘，支持批量迁移。常见场景如桌面/文档/微信/QQ 等数据迁移。',
+      downloadUrl: 'https://pan.quark.cn/s/4761ee4ba698',
+    },
+    {
+      name: 'BinlockX',
+      icon: binlockxIcon,
+      description:
+        '本地隐私保护工具。支持 AES-256-GCM 文件加密、隐私空间、隐私便签和隐私体检，数据全程保留在本机。',
+      downloadUrl: 'https://pan.quark.cn/s/4243a5142b29',
+    },
+  ];
+
+  return (
+    <div className="space-y-3">
+      <h4 className="text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider flex items-center gap-2">
+        <Rocket className="w-3.5 h-3.5" />
+        更多实用工具
+      </h4>
+      <div className="space-y-3">
+        {tools.map(({ name, icon, description, downloadUrl }) => (
+          <div
+            key={name}
+            className="rounded-2xl bg-[var(--bg-main)] border border-[var(--border-color)] p-4"
+          >
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-8 h-8 rounded-lg bg-[var(--brand-green)]/10 flex items-center justify-center">
+                {/* 使用项目原始图标，避免推荐卡片和 LightC 自身功能图标混淆。 */}
+                <img src={icon} alt={`${name} 图标`} className="w-5 h-5 object-contain" />
+              </div>
+              <h5 className="text-sm font-semibold text-[var(--text-primary)]">{name}</h5>
+            </div>
+            <p className="text-sm text-[var(--text-secondary)] leading-relaxed">{description}</p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <a
+                href={downloadUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--brand-green)] hover:border-[var(--brand-green)]/40 transition-colors"
+              >
+                <Download className="w-3.5 h-3.5" />
+                下载
+              </a>
+            </div>
+          </div>
+        ))}
+      </div>
+      <p className="text-[11px] text-[var(--text-faint)] text-center">以上同为我维护的工具，欢迎试用</p>
     </div>
   );
 }

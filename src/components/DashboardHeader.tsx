@@ -127,14 +127,14 @@ export function DashboardHeader({ onOneClickScan, onShowWelcome }: DashboardHead
   };
 
   return (
-    <div className="bg-[var(--bg-card)] border-b border-[var(--border-color)] px-6 py-4 sticky top-0 z-10">
-      <div className="max-w-5xl mx-auto flex items-center gap-8">
+    <div className="bg-[var(--bg-card)] border-b border-[var(--border-color)] px-5 py-2.5 sticky top-0 z-10">
+      <div className="max-w-5xl mx-auto flex items-center gap-5">
         {/* 健康评分 - 微信风格圆环进度 */}
         <div 
-          className="flex items-center gap-4 cursor-pointer"
+          className="flex items-center gap-3 cursor-pointer min-w-[230px]"
           onClick={handleTripleClick}
         >
-          <div className={`relative w-16 h-16 rounded-full ${scoreColor.bgLight} flex items-center justify-center`}>
+          <div className={`relative w-12 h-12 rounded-full ${scoreColor.bgLight} flex items-center justify-center shrink-0`}>
             <svg className="absolute inset-0 w-full h-full -rotate-90" viewBox="0 0 100 100">
               <circle cx="50" cy="50" r="42" fill="none" stroke="currentColor" strokeWidth="5" className="text-[var(--border-color)]" />
               <circle
@@ -144,13 +144,13 @@ export function DashboardHeader({ onOneClickScan, onShowWelcome }: DashboardHead
                 style={{ transition: 'stroke-dasharray 0.8s ease-out' }}
               />
             </svg>
-            <span className={`text-xl font-bold ${scoreColor.text} tabular-nums`}>
+            <span className={`text-base font-bold ${scoreColor.text} tabular-nums`}>
               {isLoadingHealth ? '--' : animatedScore}
             </span>
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <span className="text-[15px] font-bold text-[var(--text-primary)]">健康评分</span>
+              <span className="text-[14px] font-bold text-[var(--text-primary)]">健康评分</span>
               {healthData && (
                 <span className={`px-2 py-0.5 rounded text-[11px] font-medium ${scoreColor.bg} text-white`}>
                   {scoreColor.label}
@@ -158,7 +158,7 @@ export function DashboardHeader({ onOneClickScan, onShowWelcome }: DashboardHead
               )}
             </div>
             {healthData && (
-              <div className="flex items-center gap-4 mt-1.5 text-[12px] text-[var(--text-muted)] tabular-nums">
+              <div className="flex items-center gap-3 mt-1 text-[11px] text-[var(--text-muted)] tabular-nums">
                 <span 
                   className="flex items-center gap-1 cursor-help"
                   title="磁盘空间评分（满分40）&#10;• 可用空间 ≥30%：40分&#10;• 可用空间 20-30%：30分&#10;• 可用空间 10-20%：20分&#10;• 可用空间 <10%：10分"
@@ -186,20 +186,20 @@ export function DashboardHeader({ onOneClickScan, onShowWelcome }: DashboardHead
         </div>
 
         {/* 分隔线 */}
-        <div className="w-px h-12 bg-[var(--border-color)]" />
+        <div className="w-px h-9 bg-[var(--border-color)]" />
 
         {/* 磁盘使用情况 */}
         <div className="flex-1">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[15px] font-bold text-[var(--text-primary)]">C 盘空间</span>
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-[14px] font-bold text-[var(--text-primary)]">C 盘空间</span>
             {diskInfo && (
-              <span className="text-[13px] text-[var(--text-muted)] tabular-nums">
+              <span className="text-[12px] text-[var(--text-muted)] tabular-nums">
                 {formatSize(diskInfo.free_space)} 可用 / {formatSize(diskInfo.total_space)}
               </span>
             )}
           </div>
           {/* 进度条 - 使用柔和灰色轨道 */}
-          <div className="h-2.5 bg-[var(--bg-hover)] rounded-full overflow-hidden">
+          <div className="h-2 bg-[var(--bg-hover)] rounded-full overflow-hidden">
             {diskInfo && (
               <div 
                 className={`h-full rounded-full transition-all duration-500 ${
@@ -213,14 +213,14 @@ export function DashboardHeader({ onOneClickScan, onShowWelcome }: DashboardHead
         </div>
 
         {/* 分隔线 */}
-        <div className="w-px h-12 bg-[var(--border-color)]" />
+        <div className="w-px h-9 bg-[var(--border-color)]" />
 
         {/* 一键扫描按钮区域 */}
         <div className="flex items-center gap-2">
           {isAnyScanning ? (
             <button
               onClick={stopAllScans}
-              className="flex items-center gap-2 px-5 py-3 rounded-xl text-[14px] font-semibold transition-all duration-200 bg-[var(--color-danger)]/20 text-[var(--color-danger)] hover:bg-[var(--color-danger)]/30"
+              className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-[13px] font-semibold transition-all duration-200 bg-[var(--color-danger)]/20 text-[var(--color-danger)] hover:bg-[var(--color-danger)]/30"
               title="停止扫描"
             >
               <Square className="w-4 h-4" />
@@ -229,7 +229,7 @@ export function DashboardHeader({ onOneClickScan, onShowWelcome }: DashboardHead
           ) : (
             <button
               onClick={onOneClickScan}
-              className="flex items-center gap-2 px-6 py-3 rounded-xl text-[14px] font-semibold transition-all duration-200 bg-[var(--brand-green)] text-white hover:bg-[var(--brand-green-hover)] active:scale-[0.98]"
+              className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-[13px] font-semibold transition-all duration-200 bg-[var(--brand-green)] text-white hover:bg-[var(--brand-green-hover)] active:scale-[0.98]"
             >
               <Zap className="w-4 h-4" />
               一键扫描

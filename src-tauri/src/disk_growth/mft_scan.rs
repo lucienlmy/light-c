@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::os::windows::fs::{FileExt, OpenOptionsExt};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Instant;
 
 use winapi::shared::minwindef::{DWORD, LPVOID};
@@ -35,6 +35,29 @@ const MFT_METADATA_MAX: u64 = 25;
 const DEFAULT_MAX_DEPTH: u8 = 4;
 const METADATA_PROGRESS_STEP: usize = 10_000;
 const MFT_SIZE_READ_CHUNK: usize = 16 * 1024 * 1024;
+
+static DISK_GROWTH_SCAN_CANCELLED: AtomicBool = AtomicBool::new(false);
+
+pub fn reset_disk_growth_cancelled() {
+    DISK_GROWTH_SCAN_CANCELLED.store(false, Ordering::SeqCst);
+}
+
+pub fn cancel_disk_growth_scan() {
+    log::info!("收到取消 C 盘全盘分析请求");
+    DISK_GROWTH_SCAN_CANCELLED.store(true, Ordering::SeqCst);
+}
+
+fn is_disk_growth_cancelled() -> bool {
+    DISK_GROWTH_SCAN_CANCELLED.load(Ordering::SeqCst)
+}
+
+fn ensure_not_cancelled() -> Result<(), String> {
+    if is_disk_growth_cancelled() {
+        Err("扫描已取消".to_string())
+    } else {
+        Ok(())
+    }
+}
 
 #[repr(C)]
 #[allow(non_snake_case)]
@@ -164,6 +187,7 @@ where
     }
     let raw_entries = raw_entries?;
     push_phase_duration(&mut phase_durations, "mft", phase_start);
+    ensure_not_cancelled()?;
 
     emit_progress(
         progress,
@@ -175,9 +199,12 @@ where
     );
     let phase_start = Instant::now();
     let paths = rebuild_paths(&raw_entries, drive_letter);
+    ensure_not_cancelled()?;
     let directory_index = build_directory_index(&raw_entries, &paths, &drive_root);
+    ensure_not_cancelled()?;
     let file_records = collect_file_records(&raw_entries, &paths);
     push_phase_duration(&mut phase_durations, "path", phase_start);
+    ensure_not_cancelled()?;
 
     emit_progress(
         progress,
@@ -190,6 +217,7 @@ where
     let phase_start = Instant::now();
     let file_size_collection = collect_file_sizes(file_records, drive_letter, progress, &start);
     push_phase_duration(&mut phase_durations, "metadata", phase_start);
+    ensure_not_cancelled()?;
 
     emit_progress(
         progress,
@@ -201,6 +229,7 @@ where
     );
     let phase_start = Instant::now();
     let entries = aggregate_directories(&file_size_collection.records, &directory_index, max_depth);
+    ensure_not_cancelled()?;
     let total_size = file_size_collection
         .records
         .iter()
@@ -268,6 +297,7 @@ where
     let mut processed = 0usize;
 
     loop {
+        ensure_not_cancelled()?;
         let mut bytes_returned: DWORD = 0;
         let mut query = MftEnumDataV0 {
             StartFileReferenceNumber: start_file_reference_number,
@@ -302,6 +332,9 @@ where
 
         let mut offset = 8usize;
         while offset < bytes_returned as usize {
+            if processed % 10_000 == 0 {
+                ensure_not_cancelled()?;
+            }
             let record = unsafe { read_record(&buffer, offset) };
             let Some((record_len, entry)) = record else {
                 break;
@@ -506,6 +539,9 @@ where
         file_records
             .into_par_iter()
             .filter_map(|record| {
+                if is_disk_growth_cancelled() {
+                    return None;
+                }
                 let current = processed.fetch_add(1, Ordering::Relaxed) + 1;
                 if current % METADATA_PROGRESS_STEP == 0 || current == total {
                     emit_progress(
@@ -682,6 +718,9 @@ impl NtfsFileSizeReader {
         let mut next_record_id = 0u64;
 
         for run in &self.mft_runs {
+            if is_disk_growth_cancelled() {
+                break;
+            }
             let Some(run_start) = (run.start_lcn as u64).checked_mul(self.cluster_size) else {
                 break;
             };
@@ -694,6 +733,9 @@ impl NtfsFileSizeReader {
             let mut buffer = vec![0u8; MFT_SIZE_READ_CHUNK.max(self.file_record_size)];
 
             while bytes_read_in_run < run_bytes {
+                if is_disk_growth_cancelled() {
+                    return size_by_mft_id;
+                }
                 let remaining = (run_bytes - bytes_read_in_run) as usize;
                 let read_len = remaining.min(buffer.len());
                 let aligned_read_len = read_len - (read_len % self.file_record_size);

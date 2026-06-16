@@ -138,6 +138,11 @@ pub fn cancel_hotspot_scan() {
     HOTSPOT_SCAN_CANCELLED.store(true, Ordering::SeqCst);
 }
 
+/// 暴露给 MFT 引擎的取消状态查询，避免 MFT 阶段无视前端停止按钮继续跑完整流程。
+pub(crate) fn is_hotspot_scan_cancelled() -> bool {
+    HOTSPOT_SCAN_CANCELLED.load(Ordering::SeqCst)
+}
+
 // ============================================================================
 // 危险目录黑名单配置
 // 这些目录在深度扫描时仅统计大小，严禁执行任何删除操作
@@ -787,12 +792,13 @@ impl HotspotScanner {
 
         // 热点展开：递归展开容器目录（Windows/Program Files 等），
         // 将排行榜让给用户真正关心的可清理热点（微信/npm/Docker 等）
-        // 噪音目录（WinSxS/System32 等）已被过滤
+        // 噪音目录（WinSxS/System32 等）是否过滤由系统目录设置决定
         let mut entries = flatten_hotspots(
             all_entries,
             &child_index,
             self.top_n,
             true,
+            self.ignore_system_dirs,
         );
 
         // 按用户设置的展示深度补齐结果树。这里的深度是“从当前热点条目算起”的可见层数，
@@ -819,7 +825,7 @@ impl HotspotScanner {
                     HotspotBackend::Walkdir => "walkdir",
                 },
                 "result",
-                "扫描完成，正在刷新列表",
+                "扫描完成",
                 total_scanned.load(Ordering::Relaxed),
                 total_size.load(Ordering::Relaxed),
                 total_first_level,
@@ -1308,7 +1314,10 @@ fn build_child_index(
         }
 
         let skip_heavy = ignore_system_dirs && is_heavy_system_dir(path);
-        if is_noise_directory(path) || skip_heavy || HotspotScanner::should_skip_scan(path) {
+        // 用户关闭系统目录过滤时，需要让 WinSxS/System32 等目录真实参与排名，
+        // 否则结果会和设置语义、WizTree 这类全盘视图明显不一致。
+        let skip_noise = ignore_system_dirs && is_noise_directory(path);
+        if skip_noise || skip_heavy || HotspotScanner::should_skip_scan(path) {
             continue;
         }
 
@@ -1376,9 +1385,11 @@ fn build_tree_children_from_index(
 ///
 /// 不展开（作为终端热点）的条件：
 /// - 非保护 + 小于阈值 + 深度足够 → 这就是用户要找的目录
-fn should_expand_directory(entry: &HotspotEntry) -> bool {
+fn should_expand_directory(entry: &HotspotEntry, ignore_system_dirs: bool) -> bool {
     if entry.is_protected {
-        return true;
+        // 关闭系统目录过滤时，保护目录本身就是用户想看的磁盘占用结果；
+        // 必须优先返回 false，避免又被 20GB 阈值或一级目录规则强制展开。
+        return ignore_system_dirs;
     }
     if entry.total_size > EXPAND_SIZE_THRESHOLD {
         return true;
@@ -1445,17 +1456,20 @@ impl PartialOrd for SizeOrd {
 ///    若不应展开：作为终端热点加入结果
 /// 4. 直到结果达到 top_n 或候选队列耗尽
 ///
-/// 噪音目录（WinSxS/System32 等）始终被过滤，不进入任何队列
+/// 噪音目录（WinSxS/System32 等）在开启系统目录过滤时才会被过滤
 fn flatten_hotspots(
     all_entries: Vec<HotspotEntry>,
     child_index: &ChildIndex,
     top_n: usize,
     is_full_scan: bool,
+    ignore_system_dirs: bool,
 ) -> Vec<HotspotEntry> {
-    // 过滤掉噪音目录，放入 BinaryHeap（大顶堆，O(log n) 操作）
+    // 系统目录过滤关闭时保留噪音目录，便于和 WizTree 的全盘排名语义对齐。
     let mut candidates: BinaryHeap<SizeOrd> = all_entries
         .into_iter()
-        .filter(|e| !is_noise_directory(&PathBuf::from(&e.path)))
+        .filter(|e| {
+            !ignore_system_dirs || !is_noise_directory(&PathBuf::from(&e.path))
+        })
         .map(SizeOrd)
         .collect();
 
@@ -1466,7 +1480,9 @@ fn flatten_hotspots(
     while !candidates.is_empty() && result.len() < top_n {
         let entry = candidates.pop().unwrap().0;
 
-        if should_expand_directory(&entry) {
+        // 关闭系统目录过滤时，结果要更接近 WizTree 的全盘占用视图，
+        // 因此保护目录本身允许进入榜单，不再被无条件展开成更深层子目录。
+        if should_expand_directory(&entry, ignore_system_dirs) {
             let dir_path = PathBuf::from(&entry.path);
             let children = find_meaningful_children(&dir_path, child_index, is_full_scan);
 

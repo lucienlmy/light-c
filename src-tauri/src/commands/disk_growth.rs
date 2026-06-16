@@ -9,11 +9,17 @@ use log::info;
 use tauri::{AppHandle, Emitter};
 
 #[tauri::command]
+pub fn cancel_disk_growth_scan() {
+    crate::disk_growth::cancel_disk_growth_scan();
+}
+
+#[tauri::command]
 pub async fn scan_disk_growth(
     app_handle: AppHandle,
     max_change_entries: Option<usize>,
 ) -> Result<crate::disk_growth::DiskScanAndAnalyzeResponse, String> {
     info!("开始执行 C 盘全盘空间变化分析");
+    crate::disk_growth::reset_disk_growth_cancelled();
 
     let result = tokio::task::spawn_blocking(move || {
         crate::disk_growth::scan_and_analyze_system_drive_with_progress(&|progress| {

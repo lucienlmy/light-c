@@ -403,13 +403,15 @@ function HotspotItem({ entry, rank, maxSize, isFullScan, onOpenFolder, onCleanup
 // ============================================================================
 
 export function HotspotModule() {
-  const { modules, expandedModule, setExpandedModule, updateModuleState, oneClickScanTrigger } = useDashboard();
+  const { modules, expandedModule, setExpandedModule, updateModuleState, oneClickScanTrigger, stopScanTrigger } = useDashboard();
   const moduleState = modules.hotspot;
   const { showToast } = useToast();
   const { settings } = useSettings();
 
   const lastScanTriggerRef = useRef(0);
   const scanningRef = useRef(false);
+  const cancelRequestedRef = useRef(false);
+  const scanRunIdRef = useRef(0);
 
   // 本地状态
   const [scanResult, setScanResult] = useState<HotspotScanResult | null>(null);
@@ -492,6 +494,8 @@ export function HotspotModule() {
   const handleScan = useCallback(async () => {
     if (scanningRef.current) return;
     scanningRef.current = true;
+    cancelRequestedRef.current = false;
+    const scanRunId = ++scanRunIdRef.current;
 
     updateModuleState('hotspot', { status: 'scanning' });
     setError(null);
@@ -505,6 +509,10 @@ export function HotspotModule() {
       // 根据深度扫描开关决定扫描模式（全盘扫描条目更多）
       const topN = fullScanEnabled ? 80 : 50;
       const result = await scanHotspot(topN, fullScanEnabled, settings.hotspotDepth, settings.hotspotSizeThreshold, settings.hotspotIgnoreSystemDirs);
+      if (cancelRequestedRef.current || scanRunId !== scanRunIdRef.current) {
+        // 用户主动停止时不接收后端可能返回的半截结果，避免列表只剩一级目录造成误判。
+        return;
+      }
       setScanResult(result);
 
       // 卡片摘要：展示的目录数 + 扫描覆盖总大小（与内部统计行一致）
@@ -514,24 +522,35 @@ export function HotspotModule() {
         totalSize: result.scanned_total_size,
       });
     } catch (err) {
+      if (cancelRequestedRef.current || scanRunId !== scanRunIdRef.current) {
+        updateModuleState('hotspot', { status: 'idle', progress: 0 });
+        return;
+      }
       console.error('大目录分析扫描失败:', err);
       setError(String(err));
       updateModuleState('hotspot', { status: 'error' });
     } finally {
-      scanningRef.current = false;
-      setScanProgress(null);
+      if (scanRunId === scanRunIdRef.current) {
+        scanningRef.current = false;
+        setScanProgress(null);
+      }
     }
   }, [updateModuleState, fullScanEnabled, settings]);
 
   // 取消扫描
   const handleStopScan = useCallback(async () => {
+    cancelRequestedRef.current = true;
+    scanRunIdRef.current += 1;
+    scanningRef.current = false;
+    updateModuleState('hotspot', { status: 'idle', progress: 0 });
+    setScanProgress(null);
     try {
       await cancelHotspotScan();
-      showToast({ type: 'info', title: '扫描已停止', description: '将显示已扫描到的目录' });
+      showToast({ type: 'info', title: '扫描已停止', description: '已取消本次扫描' });
     } catch (err) {
       console.error('停止扫描失败:', err);
     }
-  }, [showToast]);
+  }, [showToast, updateModuleState]);
 
   // 同步 handleScanRef 供模态框清理回调使用
   handleScanRef.current = handleScan;
@@ -543,6 +562,16 @@ export function HotspotModule() {
       handleScan();
     }
   }, [oneClickScanTrigger, handleScan]);
+
+  useEffect(() => {
+    if (stopScanTrigger > 0 && scanningRef.current) {
+      // 全局停止按钮已经通知后端取消，这里只负责阻止旧 Promise 回写半截结果。
+      cancelRequestedRef.current = true;
+      scanRunIdRef.current += 1;
+      scanningRef.current = false;
+      setScanProgress(null);
+    }
+  }, [stopScanTrigger]);
 
   // 打开文件夹
   const handleOpenFolder = useCallback(async (path: string) => {

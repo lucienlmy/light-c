@@ -608,9 +608,19 @@ impl SocialScanner {
 
                 // --------------------------------------------------------
                 // 朋友圈/缓存 (NONE)
-                // 特征：Sns, Cache 目录
+                // 特征：Sns 是动态缓存，其余多为运行缓存、缩略图和小程序缓存。
                 // --------------------------------------------------------
-                for dir_name in &["Sns", "Cache", "Fav", "CustomEmotion"] {
+                for dir_name in &[
+                    "Sns",
+                    "Cache",
+                    "Temp",
+                    "General",
+                    "Thumb",
+                    "Web",
+                    "VideoCache",
+                    "Fav",
+                    "CustomEmotion",
+                ] {
                     let dir = file_storage.join(dir_name);
                     if dir.exists() {
                         paths.push(SocialAppPath {
@@ -624,6 +634,34 @@ impl SocialScanner {
                             is_custom_path: is_custom,
                         });
                     }
+                }
+            }
+
+            // 新版微信会把 WebView、小程序和部分临时缓存放在账号根目录，单靠 FileStorage 会漏掉。
+            for dir_name in &[
+                "Sns",
+                "Moments",
+                "Cache",
+                "Temp",
+                "Logs",
+                "log",
+                "WebView",
+                "WMPF",
+                "Applet",
+                "WeChatAppEx",
+            ] {
+                let dir = user_dir.join(dir_name);
+                if dir.exists() {
+                    paths.push(SocialAppPath {
+                        app_name: "微信".to_string(),
+                        path: dir,
+                        category: if *dir_name == "Sns" || *dir_name == "Moments" {
+                            FileCategory::MomentsCache
+                        } else {
+                            FileCategory::TempCache
+                        },
+                        is_custom_path: is_custom,
+                    });
                 }
             }
         }
@@ -1707,7 +1745,29 @@ impl SocialScanner {
         }
 
         // ================================================================
-        // 规则 3: 图片视频 (LOW)
+        // 规则 3: 朋友圈/动态缓存 (NONE)
+        // 先于媒体规则判断，是因为 Sns 目录里常见图片/视频缩略数据，不能被普通媒体规则抢走。
+        // ================================================================
+
+        let moments_path_patterns = [
+            "\\sns\\",
+            "/sns/",
+            "\\moments\\",
+            "/moments/",
+            "\\filestorage\\sns", // 微信朋友圈完整路径
+            "/filestorage/sns",
+        ];
+
+        let is_moments_dir = moments_path_patterns
+            .iter()
+            .any(|pattern| path_str.contains(pattern));
+
+        if is_moments_dir || base_category == FileCategory::MomentsCache {
+            return (FileCategory::MomentsCache, RiskLevel::None);
+        }
+
+        // ================================================================
+        // 规则 4: 图片视频 (LOW)
         // ================================================================
 
         // 媒体文件后缀
@@ -1755,29 +1815,6 @@ impl SocialScanner {
 
         if base_category == FileCategory::ImageVideo {
             return (FileCategory::ImageVideo, RiskLevel::Low);
-        }
-
-        // ================================================================
-        // 规则 4: 朋友圈/动态缓存 (NONE)
-        // ================================================================
-
-        let moments_path_patterns = [
-            "\\sns\\",
-            "/sns/",
-            "\\moments\\",
-            "/moments/",
-            "\\fav\\",
-            "/fav/",
-            "\\filestorage\\sns",  // 微信朋友圈完整路径
-            "/filestorage/sns",
-        ];
-
-        let is_moments_dir = moments_path_patterns
-            .iter()
-            .any(|pattern| path_str.contains(pattern));
-
-        if is_moments_dir || base_category == FileCategory::MomentsCache {
-            return (FileCategory::MomentsCache, RiskLevel::None);
         }
 
         // ================================================================

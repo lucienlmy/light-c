@@ -15,6 +15,7 @@ import {
   Loader2,
   Minus,
   Search,
+  XCircle,
   Sparkles,
   TrendingDown,
   TrendingUp,
@@ -25,11 +26,11 @@ import { useDashboard } from '../../contexts/DashboardContext';
 import { useSettings } from '../../contexts';
 import {
   checkAdminPrivilege,
+  cancelDiskGrowthScan,
   openInFolder,
   scanDiskGrowth,
   type DiskGrowthAnalyzeEntry,
   type DiskGrowthEntry,
-  type DiskGrowthPhaseDuration,
   type DiskGrowthReport,
   type DiskGrowthScanProgress,
   type DiskGrowthScanResponse,
@@ -72,11 +73,10 @@ function getPhaseLabel(stage: string): string {
   }
 }
 
-function formatPhaseDurations(phases: DiskGrowthPhaseDuration[]): string {
-  if (!phases.length) return '';
-  return phases
-    .map((phase) => `${getPhaseLabel(phase.stage)} ${(phase.duration_ms / 1000).toFixed(1)}s`)
-    .join(' · ');
+function formatDuration(ms?: number): string {
+  if (ms === undefined || ms < 0) return '-';
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
 }
 
 function formatPreviousScanTime(scanSummary: DiskGrowthScanResponse): string {
@@ -147,7 +147,7 @@ function SummaryCards({
         <div className="col-span-4 flex items-center gap-3 text-[12px] text-[var(--text-muted)]">
           <span className="text-red-500">新增 {formatSize(scanSummary.analyze.increased_size ?? 0)}</span>
           <span className="text-green-500">减少 {formatSize(scanSummary.analyze.decreased_size ?? 0)}</span>
-          <span>按变化量排序，最多展示 300 个目录</span>
+          <span>按变化量排序</span>
         </div>
       )}
     </div>
@@ -171,6 +171,67 @@ function DiagnosticBanner({ report }: { report: DiskGrowthReport }) {
         <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" />
       )}
       <span>{report.summary}</span>
+    </div>
+  );
+}
+
+function DiskGrowthDiagnostics({
+  scanSummary,
+  resultMode,
+  maxEntries,
+}: {
+  scanSummary: DiskGrowthScanResponse;
+  resultMode: 'change' | 'usage';
+  maxEntries: number;
+}) {
+  // 与大目录分析复用同一类诊断布局，让用户在不同 MFT 模块里看到一致的阶段耗时信息。
+  const hasPhaseDurations = scanSummary.phase_durations.length > 0;
+  const latestPhase = hasPhaseDurations
+    ? scanSummary.phase_durations[scanSummary.phase_durations.length - 1]
+    : null;
+
+  return (
+    <div className="rounded-xl bg-[var(--bg-main)] border border-[var(--border-color)] px-4 py-3 text-xs space-y-3">
+      <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-2 md:gap-4">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="shrink-0 px-2 py-0.5 rounded-md bg-[var(--brand-green)] text-white font-medium">
+            {latestPhase ? getPhaseLabel(latestPhase.stage) : '扫描完成'}
+          </span>
+          <span className="truncate text-[var(--text-primary)]">
+            {resultMode === 'change'
+              ? `展示变化目录，按变化量排序，最多 ${maxEntries} 项`
+              : '暂无变化目录，展示本次占用基线'}
+          </span>
+        </div>
+        <div className="flex items-center justify-start md:justify-end gap-4 text-[var(--text-muted)] tabular-nums">
+          <span>已处理 {scanSummary.total_files_scanned.toLocaleString()}</span>
+          <span>总耗时 {formatDuration(scanSummary.scan_duration_ms)}</span>
+        </div>
+      </div>
+
+      {hasPhaseDurations && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          {scanSummary.phase_durations.map((phase, index) => (
+            <div
+              key={`${phase.stage}-${index}`}
+              className="min-w-0 rounded-lg bg-[var(--bg-card)] border border-[var(--border-color)] px-2.5 py-2"
+            >
+              <div className="truncate text-[var(--text-muted)]">{getPhaseLabel(phase.stage)}</div>
+              <div className="mt-0.5 text-[var(--text-primary)] font-semibold tabular-nums">
+                {formatDuration(phase.duration_ms)}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 text-[var(--text-faint)]">
+        <span>引擎：{scanSummary.backend === 'mft' ? 'MFT' : scanSummary.backend}</span>
+        <span>
+          大小来源：MFT {scanSummary.mft_size_count.toLocaleString()} 个，metadata 回退{' '}
+          {scanSummary.metadata_fallback_count.toLocaleString()} 个
+        </span>
+      </div>
     </div>
   );
 }
@@ -263,11 +324,13 @@ function ChangeRow({
 }
 
 export function DiskGrowthModule() {
-  const { modules, expandedModule, setExpandedModule, updateModuleState, oneClickScanTrigger } = useDashboard();
+  const { modules, expandedModule, setExpandedModule, updateModuleState, oneClickScanTrigger, stopScanTrigger } = useDashboard();
   const { settings } = useSettings();
   const moduleState = modules.diskGrowth;
   const lastScanTriggerRef = useRef(0);
   const scanningRef = useRef(false);
+  const cancelRequestedRef = useRef(false);
+  const scanRunIdRef = useRef(0);
 
   const [scanSummary, setScanSummary] = useState<DiskGrowthScanResponse | null>(null);
   const [growthReport, setGrowthReport] = useState<DiskGrowthReport | null>(null);
@@ -336,6 +399,8 @@ export function DiskGrowthModule() {
       return;
     }
     scanningRef.current = true;
+    cancelRequestedRef.current = false;
+    const scanRunId = ++scanRunIdRef.current;
 
     updateModuleState('diskGrowth', { status: 'scanning', error: null, fileCount: 0, totalSize: 0 });
     setError(null);
@@ -346,6 +411,10 @@ export function DiskGrowthModule() {
 
     try {
       const result = await scanDiskGrowth(settings.diskGrowthMaxEntries);
+      if (cancelRequestedRef.current || scanRunId !== scanRunIdRef.current) {
+        // 用户取消后不接收可能已经返回的旧结果，避免把被中断的扫描写成正常完成。
+        return;
+      }
       setScanSummary(result);
       setGrowthReport(result.growth);
       updateModuleState('diskGrowth', {
@@ -354,13 +423,32 @@ export function DiskGrowthModule() {
         totalSize: Math.abs(result.growth.total_growth),
       });
     } catch (err) {
+      if (cancelRequestedRef.current || scanRunId !== scanRunIdRef.current) {
+        updateModuleState('diskGrowth', { status: 'idle', progress: 0 });
+        return;
+      }
       const message = String(err);
       setError(message);
       updateModuleState('diskGrowth', { status: 'error', error: message });
     } finally {
-      scanningRef.current = false;
+      if (scanRunId === scanRunIdRef.current) {
+        scanningRef.current = false;
+      }
     }
   }, [isAdmin, settings.diskGrowthMaxEntries, updateModuleState]);
+
+  const handleStopScan = useCallback(async () => {
+    cancelRequestedRef.current = true;
+    scanRunIdRef.current += 1;
+    scanningRef.current = false;
+    updateModuleState('diskGrowth', { status: 'idle', progress: 0 });
+    setScanProgress(null);
+    try {
+      await cancelDiskGrowthScan();
+    } catch (err) {
+      console.error('停止 C 盘全盘分析失败:', err);
+    }
+  }, [updateModuleState]);
 
   useEffect(() => {
     if (oneClickScanTrigger > 0 && oneClickScanTrigger !== lastScanTriggerRef.current) {
@@ -368,6 +456,16 @@ export function DiskGrowthModule() {
       handleScan();
     }
   }, [oneClickScanTrigger, handleScan]);
+
+  useEffect(() => {
+    if (stopScanTrigger > 0 && scanningRef.current) {
+      // 全局停止按钮已发后端取消信号；本地只标记取消，避免旧扫描结果回写 UI。
+      cancelRequestedRef.current = true;
+      scanRunIdRef.current += 1;
+      scanningRef.current = false;
+      setScanProgress(null);
+    }
+  }, [stopScanTrigger]);
 
   const handleOpenFolder = useCallback(async (path: string) => {
     try {
@@ -451,6 +549,15 @@ export function DiskGrowthModule() {
           <p className="text-xs text-[var(--text-faint)] mt-1">
             首次扫描会建立快照，下次扫描开始展示新增和减少的目录
           </p>
+          <button
+            onClick={handleStopScan}
+            className="mt-4 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
+              bg-red-50 dark:bg-red-900/20 text-red-500 hover:bg-red-100 dark:hover:bg-red-900/30
+              border border-red-200 dark:border-red-800/30 transition-colors"
+          >
+            <XCircle className="w-3.5 h-3.5" />
+            停止扫描
+          </button>
         </div>
       )}
 
@@ -460,29 +567,14 @@ export function DiskGrowthModule() {
           <DiagnosticBanner report={growthReport} />
 
           <div className="flex items-center justify-between">
-            <p className="text-[13px] text-[var(--text-muted)]">
-              共 {entries.length} 个目录结果，扫描耗时 {(scanSummary.scan_duration_ms / 1000).toFixed(1)}s
-            </p>
-            <span className="text-[12px] text-[var(--text-faint)]">
-              引擎: {scanSummary.backend === 'mft' ? 'MFT' : scanSummary.backend}
-              {isAdmin ? ' · 管理员' : ''}
-            </span>
+            <p className="text-[13px] text-[var(--text-muted)]">共 {entries.length} 个目录结果</p>
+            <span className="text-[12px] text-[var(--text-faint)]">{isAdmin ? '管理员模式' : '非管理员模式'}</span>
           </div>
-          {scanSummary.phase_durations.length > 0 && (
-            <p className="text-[12px] text-[var(--text-faint)]">
-              阶段耗时：{formatPhaseDurations(scanSummary.phase_durations)}
-            </p>
-          )}
-          <p className="text-[12px] text-[var(--text-faint)]">
-            列表模式：
-            {resultMode === 'change'
-              ? `仅展示与上次快照相比发生变化的目录，按变化量绝对值排序，最多 ${settings.diskGrowthMaxEntries} 项`
-              : '当前没有可展示的变化目录，暂时展示本次占用较大的目录作为基线参考'}
-          </p>
-          <p className="text-[12px] text-[var(--text-faint)]">
-            大小来源：MFT {scanSummary.mft_size_count.toLocaleString()} 个，metadata 回退{' '}
-            {scanSummary.metadata_fallback_count.toLocaleString()} 个
-          </p>
+          <DiskGrowthDiagnostics
+            scanSummary={scanSummary}
+            resultMode={resultMode}
+            maxEntries={settings.diskGrowthMaxEntries}
+          />
 
           <div className="bg-[var(--bg-main)] rounded-xl overflow-hidden">
             <div className="flex items-center gap-3 px-4 py-2 border-b border-[var(--border-color)] text-[11px] text-[var(--text-faint)] uppercase tracking-wider">

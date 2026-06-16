@@ -5,6 +5,10 @@
 
 use log::{info, warn};
 use serde::{Deserialize, Serialize};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    LazyLock, RwLock,
+};
 use tauri::{Emitter, Manager, Window};
 
 // ============================================================================
@@ -31,6 +35,19 @@ pub struct SystemSlimStatus {
     pub items: Vec<SlimItemStatus>,
     pub total_reclaimable: u64,
 }
+
+const WINSXS_ANALYZE_TIMEOUT_SECS: u64 = 5;
+const WINSXS_CACHE_TTL_SECS: u64 = 10 * 60;
+
+#[derive(Debug, Clone, Copy)]
+struct WinsxsAnalyzeCache {
+    size: u64,
+    cached_at: std::time::Instant,
+}
+
+static WINSXS_ANALYZE_CACHE: LazyLock<RwLock<Option<WinsxsAnalyzeCache>>> =
+    LazyLock::new(|| RwLock::new(None));
+static WINSXS_ANALYZE_RUNNING: AtomicBool = AtomicBool::new(false);
 
 // ============================================================================
 // 权限检测
@@ -160,15 +177,37 @@ async fn get_winsxs_status() -> SlimItemStatus {
     }
 }
 
-/// 异步运行 DISM 分析，包装 spawn_blocking + 30s 超时
+/// 异步运行 DISM 分析：DISM 首次分析天然较慢，因此检查页只做短超时并复用短期缓存。
 async fn analyze_winsxs_async() -> u64 {
     #[cfg(target_os = "windows")]
     {
-        let dism_result = tokio::time::timeout(
-            std::time::Duration::from_secs(30),
-            tokio::task::spawn_blocking(analyze_winsxs_sync),
-        )
-        .await;
+        if let Some(size) = get_cached_winsxs_size() {
+            return size;
+        }
+
+        if WINSXS_ANALYZE_RUNNING.swap(true, Ordering::SeqCst) {
+            warn!("DISM 分析仍在运行，跳过本次重复检查");
+            return 0;
+        }
+
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        tokio::task::spawn_blocking(move || {
+            let result = analyze_winsxs_sync();
+            if let Ok(size) = result {
+                set_cached_winsxs_size(size);
+                let _ = sender.send(Ok(size));
+            } else {
+                WINSXS_ANALYZE_RUNNING.store(false, Ordering::SeqCst);
+                let _ = sender.send(result);
+                return;
+            }
+            // DISM 超时返回后阻塞任务仍可能继续运行，必须等真实结束后再允许下一次分析。
+            WINSXS_ANALYZE_RUNNING.store(false, Ordering::SeqCst);
+        });
+
+        let dism_result =
+            tokio::time::timeout(std::time::Duration::from_secs(WINSXS_ANALYZE_TIMEOUT_SECS), receiver)
+                .await;
 
         // 双重 Result：外层 timeout，中层 spawn_blocking，内层 analyze_winsxs_sync
         match dism_result {
@@ -183,6 +222,33 @@ async fn analyze_winsxs_async() -> u64 {
     #[cfg(not(target_os = "windows"))]
     {
         0
+    }
+}
+
+fn get_cached_winsxs_size() -> Option<u64> {
+    let cache = WINSXS_ANALYZE_CACHE.read().ok()?;
+    let cached = cache.as_ref()?;
+    // WinSxS 可回收大小短时间内不会频繁变化，缓存能避免页面重复打开时反复卡在 DISM 分析。
+    if cached.cached_at.elapsed().as_secs() <= WINSXS_CACHE_TTL_SECS {
+        return Some(cached.size);
+    }
+    None
+}
+
+fn set_cached_winsxs_size(size: u64) {
+    if let Ok(mut cache) = WINSXS_ANALYZE_CACHE.write() {
+        // 只缓存成功解析到的结果，失败和超时保持 0，避免把临时异常固化到检查结果里。
+        *cache = Some(WinsxsAnalyzeCache {
+            size,
+            cached_at: std::time::Instant::now(),
+        });
+    }
+}
+
+fn clear_cached_winsxs_size() {
+    if let Ok(mut cache) = WINSXS_ANALYZE_CACHE.write() {
+        // 清理会改变组件存储状态，必须让下次检查重新分析而不是继续展示旧估算。
+        *cache = None;
     }
 }
 
@@ -591,6 +657,7 @@ pub async fn cleanup_winsxs(window: &Window) -> Result<String, String> {
 
         if result.status.success() {
             info!("WinSxS 清理完成");
+            clear_cached_winsxs_size();
             let _ = window.emit(
                 "winsxs-cleanup-progress",
                 serde_json::json!({

@@ -1076,6 +1076,10 @@ export async function scanDiskGrowth(maxChangeEntries?: number): Promise<DiskGro
   return invoke<DiskGrowthScanResponse>('scan_disk_growth', { maxChangeEntries });
 }
 
+export async function cancelDiskGrowthScan(): Promise<void> {
+  return invoke<void>('cancel_disk_growth_scan');
+}
+
 // ============================================================================
 // 鏁版嵁鐩綍绠＄悊 API
 // ============================================================================
@@ -1107,4 +1111,3 @@ export async function clearLocalData(): Promise<[number, number]> {
 export async function pickFolderDialog(): Promise<string | null> {
   return invoke<string | null>('pick_folder_dialog');
 }
-

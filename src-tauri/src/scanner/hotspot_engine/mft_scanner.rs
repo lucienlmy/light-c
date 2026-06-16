@@ -12,7 +12,7 @@ use std::time::Instant;
 use log::info;
 
 use crate::scanner::big_files_engine::mft_core;
-use crate::scanner::hotspot::FolderStats;
+use crate::scanner::hotspot::{is_hotspot_scan_cancelled, FolderStats};
 
 #[derive(Clone)]
 struct DirectoryInfo {
@@ -57,6 +57,9 @@ pub fn scan_via_mft(
     let handle = mft_core::open_volume(drive_letter)?;
     let stage_start = Instant::now();
     let enumerate_result = mft_core::enumerate_usn_records_v2(handle, &|processed| {
+        if is_hotspot_scan_cancelled() {
+            return false;
+        }
         progress_cb(MftScanProgress {
             stage: "mft",
             message: if processed == 0 {
@@ -105,6 +108,9 @@ pub fn scan_via_mft(
     let metadata_reader = mft_core::NtfsFileMetadataReader::open(drive_letter)?;
     let stage_start = Instant::now();
     let metadata_by_id = metadata_reader.read_file_metadata_map(&file_targets.ids, &|processed| {
+        if is_hotspot_scan_cancelled() {
+            return false;
+        }
         progress_cb(MftScanProgress {
             stage: "metadata",
             message: format!("正在顺序解析 $MFT 文件大小，已处理 {} 条记录", processed),
