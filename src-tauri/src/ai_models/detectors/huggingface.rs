@@ -19,6 +19,11 @@ impl ModelDetector for HuggingFaceDetector {
     fn detect(&self) -> DetectorOutput {
         let mut candidate_roots = Vec::new();
 
+        if let Ok(hf_home) = std::env::var("HF_HOME") {
+            // HuggingFace 官方允许通过 HF_HOME 改缓存根目录，优先读取它能覆盖大多数迁移到其他盘的用户。
+            candidate_roots.push(PathBuf::from(hf_home));
+        }
+
         if let Some(home_dir) = user_home_dir() {
             candidate_roots.push(home_dir.join(".cache").join("huggingface"));
         }

@@ -1191,14 +1191,15 @@ export interface AiModelScanResult {
   sources: AiAssetSource[];
   warnings: string[];
   scan_duration_ms: number;
+  discovery_mode: 'quick' | 'deep';
 }
 
 /**
  * 快速扫描已知 AI 平台目录和用户自定义目录。
- * 后端只扫描明确目录，避免启动全盘扫描造成 IO 压力。
+ * 深度发现由用户显式开启，后端才会追加 MFT 兜底扫描，避免默认行为带来全盘 IO 压力。
  */
-export async function scanAiModelAssets(customPaths: string[]): Promise<AiModelScanResult> {
-  return invoke<AiModelScanResult>('scan_ai_model_assets', { customPaths });
+export async function scanAiModelAssets(customPaths: string[], enableDeepDiscovery: boolean): Promise<AiModelScanResult> {
+  return invoke<AiModelScanResult>('scan_ai_model_assets', { customPaths, enableDeepDiscovery });
 }
 
 // ============================================================================

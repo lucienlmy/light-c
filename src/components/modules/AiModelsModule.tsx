@@ -27,6 +27,7 @@ import {
 import { formatSize } from '../../utils/format';
 
 const CUSTOM_PATHS_STORAGE_KEY = 'lightc.aiModels.customPaths';
+const DEEP_DISCOVERY_STORAGE_KEY = 'lightc.aiModels.deepDiscovery';
 const LARGE_MODEL_THRESHOLD = 20 * 1024 * 1024 * 1024;
 const TOP_MODEL_LIMIT = 8;
 
@@ -46,6 +47,7 @@ export function AiModelsModule({ layoutMode = 'cards' }: { layoutMode?: 'cards' 
 
   const [scanResult, setScanResult] = useState<AiModelScanResult | null>(null);
   const [customPaths, setCustomPaths] = useState<string[]>(() => loadCustomPaths());
+  const [enableDeepDiscovery, setEnableDeepDiscovery] = useState(() => loadDeepDiscovery());
   const [viewMode, setViewMode] = useState<AiModelViewMode>('overview');
   const [selectedSourceName, setSelectedSourceName] = useState<string | null>(null);
 
@@ -65,6 +67,11 @@ export function AiModelsModule({ layoutMode = 'cards' }: { layoutMode?: 'cards' 
     localStorage.setItem(CUSTOM_PATHS_STORAGE_KEY, JSON.stringify(customPaths));
   }, [customPaths]);
 
+  useEffect(() => {
+    // 深度发现会触发全盘 MFT 兜底，记住用户选择可以避免每次进入模块都反复确认。
+    localStorage.setItem(DEEP_DISCOVERY_STORAGE_KEY, JSON.stringify(enableDeepDiscovery));
+  }, [enableDeepDiscovery]);
+
   const handleScan = useCallback(async () => {
     if (scanningRef.current) return;
 
@@ -73,7 +80,7 @@ export function AiModelsModule({ layoutMode = 'cards' }: { layoutMode?: 'cards' 
     setExpandedModule('aiModels');
 
     try {
-      const result = await scanAiModelAssets(customPaths);
+      const result = await scanAiModelAssets(customPaths, enableDeepDiscovery);
       setScanResult(result);
       setSelectedSourceName(result.sources[0]?.name ?? null);
       updateModuleState('aiModels', {
@@ -95,7 +102,7 @@ export function AiModelsModule({ layoutMode = 'cards' }: { layoutMode?: 'cards' 
     } finally {
       scanningRef.current = false;
     }
-  }, [customPaths, setExpandedModule, showToast, updateModuleState]);
+  }, [customPaths, enableDeepDiscovery, setExpandedModule, showToast, updateModuleState]);
 
   useEffect(() => {
     if (oneClickScanTrigger > 0 && oneClickScanTrigger !== lastScanTriggerRef.current) {
@@ -169,6 +176,12 @@ export function AiModelsModule({ layoutMode = 'cards' }: { layoutMode?: 'cards' 
       }
     >
       <div className="p-5 space-y-5">
+        <DeepDiscoveryToggle
+          enabled={enableDeepDiscovery}
+          disabled={isScanning}
+          onChange={setEnableDeepDiscovery}
+        />
+
         {customPaths.length > 0 && (
           <CustomPathList paths={customPaths} onRemove={handleRemoveCustomPath} />
         )}
@@ -195,9 +208,13 @@ export function AiModelsModule({ layoutMode = 'cards' }: { layoutMode?: 'cards' 
             <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--brand-green)]/10">
               <Loader2 className="h-7 w-7 animate-spin text-[var(--brand-green)]" />
             </div>
-            <p className="text-sm font-semibold text-[var(--text-primary)]">正在快速检测 AI 资产...</p>
+            <p className="text-sm font-semibold text-[var(--text-primary)]">
+              {enableDeepDiscovery ? '正在深度发现 AI 资产...' : '正在快速检测 AI 资产...'}
+            </p>
             <p className="mt-1 text-xs text-[var(--text-muted)]">
-              只扫描已知平台目录和你添加的目录，不会启动全盘扫描。
+              {enableDeepDiscovery
+                ? '正在用 MFT 扫描本地 NTFS 盘的大模型特征文件，并跳过已识别平台路径。'
+                : '只扫描已知平台目录和你添加的目录，不会启动全盘扫描。'}
             </p>
           </div>
         )}
@@ -267,6 +284,42 @@ export function AiModelsModule({ layoutMode = 'cards' }: { layoutMode?: 'cards' 
   );
 }
 
+function DeepDiscoveryToggle({
+  enabled,
+  disabled,
+  onChange,
+}: {
+  enabled: boolean;
+  disabled: boolean;
+  onChange: (enabled: boolean) => void;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-4 rounded-2xl border border-[var(--border-color)] bg-[var(--bg-main)] p-4">
+      <div className="min-w-0">
+        <p className="text-sm font-semibold text-[var(--text-primary)]">深度发现</p>
+        <p className="mt-1 text-xs leading-relaxed text-[var(--text-muted)]">
+          开启后使用 MFT 扫描本地 NTFS 盘的大模型特征文件，适合不知道模型放在哪个盘的情况；管理员权限下速度和覆盖率更好。
+        </p>
+      </div>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => onChange(!enabled)}
+        className={`relative h-7 w-12 shrink-0 rounded-full transition ${
+          enabled ? 'bg-[var(--brand-green)]' : 'bg-[var(--bg-hover)]'
+        } ${disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
+        aria-pressed={enabled}
+      >
+        <span
+          className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow-sm transition ${
+            enabled ? 'left-6' : 'left-1'
+          }`}
+        />
+      </button>
+    </div>
+  );
+}
+
 function HeroOverview({
   scanResult,
   largestModel,
@@ -286,7 +339,7 @@ function HeroOverview({
           {formatSize(scanResult.total_size)}
         </p>
         <p className="mt-2 text-xs text-[var(--text-muted)]">
-          发现 {scanResult.total_model_count.toLocaleString()} 个资产 · {scanResult.source_count} 个来源 · {scanResult.scan_duration_ms}ms
+          发现 {scanResult.total_model_count.toLocaleString()} 个资产 · {scanResult.source_count} 个来源 · {scanResult.discovery_mode === 'deep' ? '深度发现' : '快速扫描'} · {scanResult.scan_duration_ms}ms
         </p>
       </div>
 
@@ -569,6 +622,15 @@ function loadCustomPaths(): string[] {
     return parsedValue.filter((path): path is string => typeof path === 'string' && path.trim().length > 0);
   } catch {
     return [];
+  }
+}
+
+function loadDeepDiscovery(): boolean {
+  try {
+    // 本地存储可能被用户或旧版本写入异常内容，读取时只接受明确的 true。
+    return JSON.parse(localStorage.getItem(DEEP_DISCOVERY_STORAGE_KEY) ?? 'false') === true;
+  } catch {
+    return false;
   }
 }
 

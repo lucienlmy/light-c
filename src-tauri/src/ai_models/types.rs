@@ -25,4 +25,5 @@ pub struct AiModelScanResult {
     pub sources: Vec<AssetSource>,
     pub warnings: Vec<String>,
     pub scan_duration_ms: u128,
+    pub discovery_mode: String,
 }

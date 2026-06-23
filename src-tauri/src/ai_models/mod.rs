@@ -1,4 +1,5 @@
 mod detectors;
+mod mft_discovery;
 mod scanner;
 mod types;
 
