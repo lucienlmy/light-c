@@ -30,7 +30,7 @@ import {
 import { ModuleCard } from '../ModuleCard';
 import { EmptyState } from '../EmptyState';
 import { useToast } from '../Toast';
-import { useDashboard } from '../../contexts/DashboardContext';
+import { useModuleDashboard } from '../../contexts/DashboardContext';
 import {
   scanSocialCache,
   deleteFiles,
@@ -46,6 +46,7 @@ import {
   getRiskLevelTooltip
 } from '../../api/commands';
 import { formatSize } from '../../utils/format';
+import { shouldSkipInactivePageRender, type ModuleRenderProps } from './moduleProps';
 
 // ============================================================================
 // 分类配置
@@ -104,9 +105,8 @@ const riskLevelConfig: Record<RiskLevel, {
 // 组件实现
 // ============================================================================
 
-export function SocialCleanModule({ layoutMode = 'cards' }: { layoutMode?: 'cards' | 'pages' }) {
-  const { modules, expandedModule, setExpandedModule, updateModuleState, triggerHealthRefresh, oneClickScanTrigger } = useDashboard();
-  const moduleState = modules.social;
+export function SocialCleanModule({ layoutMode = 'cards', isPageActive = true }: ModuleRenderProps) {
+  const { moduleState, expandedModule, setExpandedModule, updateModuleState, triggerHealthRefresh, oneClickScanTrigger } = useModuleDashboard('social');
   const { showToast } = useToast();
 
   // 用于跟踪是否已处理过当前的一键扫描触发
@@ -277,6 +277,10 @@ export function SocialCleanModule({ layoutMode = 'cards' }: { layoutMode?: 'card
     }), { files: 0, size: 0 }) || { files: 0, size: 0 };
 
   const isExpanded = expandedModule === 'social';
+
+  if (shouldSkipInactivePageRender(layoutMode, isPageActive) && !isDeleting && !showDeleteConfirm && !fileModalData) {
+    return null;
+  }
 
   return (
     <>

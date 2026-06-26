@@ -7,7 +7,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { listen } from '@tauri-apps/api/event';
-import { openUrl } from '@tauri-apps/plugin-opener';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
@@ -27,8 +26,10 @@ import {
 } from 'lucide-react';
 import { ModuleCard } from '../ModuleCard';
 import { EmptyState } from '../EmptyState';
-import { useDashboard } from '../../contexts/DashboardContext';
+import { useModuleDashboard } from '../../contexts/DashboardContext';
 import { useSettings } from '../../contexts';
+import { openSearchUrl } from '../../utils/searchEngine';
+import { shouldSkipInactivePageRender, type ModuleRenderProps } from './moduleProps';
 import {
   checkAdminPrivilege,
   cancelDiskGrowthScan,
@@ -719,10 +720,9 @@ function DiskGrowthDetailsModal({
   );
 }
 
-export function DiskGrowthModule({ layoutMode = 'cards' }: { layoutMode?: 'cards' | 'pages' }) {
-  const { modules, expandedModule, setExpandedModule, updateModuleState, oneClickScanTrigger, stopScanTrigger } = useDashboard();
+export function DiskGrowthModule({ layoutMode = 'cards', isPageActive = true }: ModuleRenderProps) {
+  const { moduleState, expandedModule, setExpandedModule, updateModuleState, oneClickScanTrigger, stopScanTrigger } = useModuleDashboard('diskGrowth');
   const { settings } = useSettings();
-  const moduleState = modules.diskGrowth;
   const lastScanTriggerRef = useRef(0);
   const scanningRef = useRef(false);
   const cancelRequestedRef = useRef(false);
@@ -876,8 +876,7 @@ export function DiskGrowthModule({ layoutMode = 'cards' }: { layoutMode?: 'cards
   const handleSearchPath = useCallback(async (path: string) => {
     try {
       // 变化目录不等于可清理目录，搜索文案先确认用途，再辅助判断是否可删。
-      const query = encodeURIComponent(`Windows 路径 ${path} 是什么 有什么作用 可以删除吗`);
-      await openUrl(`https://www.bing.com/search?q=${query}`);
+      await openSearchUrl(`Windows 路径 ${path} 是什么 有什么作用 可以删除吗`);
     } catch (err) {
       console.error('搜索路径用途失败:', err);
     }
@@ -905,6 +904,10 @@ export function DiskGrowthModule({ layoutMode = 'cards' }: { layoutMode?: 'cards
   const resultMode = growthReport?.entries.length ? 'change' : 'usage';
   const displayedEntries = showAll ? entries : entries.slice(0, 20);
   const hasMore = entries.length > displayedEntries.length;
+
+  if (shouldSkipInactivePageRender(layoutMode, isPageActive) && !detailEntry) {
+    return null;
+  }
 
   return (
     <ModuleCard

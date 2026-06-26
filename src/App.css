@@ -338,6 +338,33 @@ body {
   animation: fade-in 0.2s ease-out forwards;
 }
 
+/* 页面模式入场动画只作用于当前页容器，避免 Framer Motion 重新协调所有常驻模块树。 */
+@keyframes page-content-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 两个等价 class 交替使用，让同一个模块实例在不卸载的情况下也能稳定重播动画。 */
+.page-content-enter-even,
+.page-content-enter-odd {
+  animation: page-content-enter 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  will-change: opacity, transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-content-enter-even,
+  .page-content-enter-odd {
+    animation: none;
+    will-change: auto;
+  }
+}
+
 /* ============================================================================
    桌面应用规范化 - 禁用文本选中
    让应用更像原生桌面软件而非网页

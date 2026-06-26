@@ -3,7 +3,7 @@
 // 管理所有清理模块的扫描状态，支持并发扫描和实时进度更新
 // ============================================================================
 
-import { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, useMemo, ReactNode } from 'react';
 import {
   cancelDiskGrowthScan,
   cancelHotspotScan,
@@ -57,6 +57,8 @@ export interface ModulesState {
   contextMenu: ModuleState;
   /** C 盘全盘变化分析模块 */
   diskGrowth: ModuleState;
+  /** AI资产分析模块 */
+  aiModels: ModuleState;
 }
 
 /** 仪表盘 Context 值类型 */
@@ -95,6 +97,30 @@ export interface DashboardContextValue {
   stopScanTrigger: number;
 }
 
+interface DashboardActionsValue {
+  setExpandedModule: (moduleId: string | null) => void;
+  updateModuleState: (moduleId: keyof ModulesState, state: Partial<ModuleState>) => void;
+  refreshDiskInfo: () => Promise<void>;
+  refreshHealthScore: () => Promise<void>;
+  triggerHealthRefresh: () => void;
+  triggerOneClickScan: () => void;
+  stopAllScans: () => void;
+}
+
+interface DashboardSignalsValue {
+  expandedModule: string | null;
+  healthRefreshTrigger: number;
+  oneClickScanTrigger: number;
+  stopScanTrigger: number;
+}
+
+interface DashboardSummaryValue {
+  diskInfo: DiskInfo | null;
+  healthData: HealthScoreResult | null;
+  isLoadingHealth: boolean;
+  isAnyScanning: boolean;
+}
+
 // ============================================================================
 // 初始状态
 // ============================================================================
@@ -120,6 +146,7 @@ const initialModulesState: ModulesState = {
   hotspot: { ...initialModuleState },
   contextMenu: { ...initialModuleState },
   diskGrowth: { ...initialModuleState },
+  aiModels: { ...initialModuleState },
 };
 
 // ============================================================================
@@ -127,6 +154,22 @@ const initialModulesState: ModulesState = {
 // ============================================================================
 
 const DashboardContext = createContext<DashboardContextValue | null>(null);
+const DashboardActionsContext = createContext<DashboardActionsValue | null>(null);
+const DashboardSignalsContext = createContext<DashboardSignalsValue | null>(null);
+const DashboardSummaryContext = createContext<DashboardSummaryValue | null>(null);
+
+const ModuleStateContexts: { [K in keyof ModulesState]: React.Context<ModuleState | null> } = {
+  junk: createContext<ModuleState | null>(null),
+  bigFiles: createContext<ModuleState | null>(null),
+  social: createContext<ModuleState | null>(null),
+  system: createContext<ModuleState | null>(null),
+  leftovers: createContext<ModuleState | null>(null),
+  registry: createContext<ModuleState | null>(null),
+  hotspot: createContext<ModuleState | null>(null),
+  contextMenu: createContext<ModuleState | null>(null),
+  diskGrowth: createContext<ModuleState | null>(null),
+  aiModels: createContext<ModuleState | null>(null),
+};
 
 // ============================================================================
 // Provider 组件
@@ -218,7 +261,10 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
   }, []);
 
   // 计算是否有任何模块正在扫描
-  const isAnyScanning = Object.values(modules).some(m => m.status === 'scanning');
+  const isAnyScanning = useMemo(
+    () => Object.values(modules).some(m => m.status === 'scanning'),
+    [modules]
+  );
 
   // 初始化加载
   useEffect(() => {
@@ -234,7 +280,39 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
     }
   }, [healthRefreshTrigger, refreshHealthScore, refreshDiskInfo]);
 
-  const value: DashboardContextValue = {
+  const actionsValue = useMemo<DashboardActionsValue>(() => ({
+    setExpandedModule,
+    updateModuleState,
+    refreshDiskInfo,
+    refreshHealthScore,
+    triggerHealthRefresh,
+    triggerOneClickScan,
+    stopAllScans,
+  }), [
+    setExpandedModule,
+    updateModuleState,
+    refreshDiskInfo,
+    refreshHealthScore,
+    triggerHealthRefresh,
+    triggerOneClickScan,
+    stopAllScans,
+  ]);
+
+  const signalsValue = useMemo<DashboardSignalsValue>(() => ({
+    expandedModule,
+    healthRefreshTrigger,
+    oneClickScanTrigger,
+    stopScanTrigger,
+  }), [expandedModule, healthRefreshTrigger, oneClickScanTrigger, stopScanTrigger]);
+
+  const summaryValue = useMemo<DashboardSummaryValue>(() => ({
+    diskInfo,
+    healthData,
+    isLoadingHealth,
+    isAnyScanning,
+  }), [diskInfo, healthData, isLoadingHealth, isAnyScanning]);
+
+  const value = useMemo<DashboardContextValue>(() => ({
     diskInfo,
     healthData,
     isLoadingHealth,
@@ -251,11 +329,54 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
     triggerOneClickScan,
     stopAllScans,
     stopScanTrigger,
-  };
+  }), [
+    diskInfo,
+    healthData,
+    isLoadingHealth,
+    modules,
+    expandedModule,
+    setExpandedModule,
+    updateModuleState,
+    refreshDiskInfo,
+    refreshHealthScore,
+    isAnyScanning,
+    healthRefreshTrigger,
+    triggerHealthRefresh,
+    oneClickScanTrigger,
+    triggerOneClickScan,
+    stopAllScans,
+    stopScanTrigger,
+  ]);
 
   return (
     <DashboardContext.Provider value={value}>
-      {children}
+      <DashboardActionsContext.Provider value={actionsValue}>
+        <DashboardSignalsContext.Provider value={signalsValue}>
+          <DashboardSummaryContext.Provider value={summaryValue}>
+            <ModuleStateContexts.junk.Provider value={modules.junk}>
+              <ModuleStateContexts.bigFiles.Provider value={modules.bigFiles}>
+                <ModuleStateContexts.social.Provider value={modules.social}>
+                  <ModuleStateContexts.system.Provider value={modules.system}>
+                    <ModuleStateContexts.leftovers.Provider value={modules.leftovers}>
+                      <ModuleStateContexts.registry.Provider value={modules.registry}>
+                        <ModuleStateContexts.hotspot.Provider value={modules.hotspot}>
+                          <ModuleStateContexts.contextMenu.Provider value={modules.contextMenu}>
+                            <ModuleStateContexts.diskGrowth.Provider value={modules.diskGrowth}>
+                              <ModuleStateContexts.aiModels.Provider value={modules.aiModels}>
+                                {children}
+                              </ModuleStateContexts.aiModels.Provider>
+                            </ModuleStateContexts.diskGrowth.Provider>
+                          </ModuleStateContexts.contextMenu.Provider>
+                        </ModuleStateContexts.hotspot.Provider>
+                      </ModuleStateContexts.registry.Provider>
+                    </ModuleStateContexts.leftovers.Provider>
+                  </ModuleStateContexts.system.Provider>
+                </ModuleStateContexts.social.Provider>
+              </ModuleStateContexts.bigFiles.Provider>
+            </ModuleStateContexts.junk.Provider>
+          </DashboardSummaryContext.Provider>
+        </DashboardSignalsContext.Provider>
+      </DashboardActionsContext.Provider>
     </DashboardContext.Provider>
   );
 }
@@ -270,6 +391,55 @@ export function useDashboard(): DashboardContextValue {
     throw new Error('useDashboard 必须在 DashboardProvider 内部使用');
   }
   return context;
+}
+
+export function useDashboardActions(): DashboardActionsValue {
+  const context = useContext(DashboardActionsContext);
+  if (!context) {
+    throw new Error('useDashboardActions 必须在 DashboardProvider 内部使用');
+  }
+  return context;
+}
+
+export function useDashboardSummary(): DashboardSummaryValue {
+  const context = useContext(DashboardSummaryContext);
+  if (!context) {
+    throw new Error('useDashboardSummary 必须在 DashboardProvider 内部使用');
+  }
+  return context;
+}
+
+export function useDashboardSignals(): DashboardSignalsValue {
+  const context = useContext(DashboardSignalsContext);
+  if (!context) {
+    throw new Error('useDashboardSignals 必须在 DashboardProvider 内部使用');
+  }
+  return context;
+}
+
+export function useDashboardModuleState(moduleId: keyof ModulesState): ModuleState {
+  const context = useContext(ModuleStateContexts[moduleId]);
+  if (!context) {
+    throw new Error('useDashboardModuleState 必须在 DashboardProvider 内部使用');
+  }
+  return context;
+}
+
+export function useModuleDashboard(moduleId: keyof ModulesState) {
+  const moduleState = useDashboardModuleState(moduleId);
+  const actions = useDashboardActions();
+  const signals = useDashboardSignals();
+
+  // 模块只订阅自己的扫描状态；全局触发信号仍单独订阅，保持一键扫描/停止扫描行为不变。
+  return {
+    moduleState,
+    expandedModule: signals.expandedModule,
+    oneClickScanTrigger: signals.oneClickScanTrigger,
+    stopScanTrigger: signals.stopScanTrigger,
+    setExpandedModule: actions.setExpandedModule,
+    updateModuleState: actions.updateModuleState,
+    triggerHealthRefresh: actions.triggerHealthRefresh,
+  };
 }
 
 export default DashboardContext;

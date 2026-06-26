@@ -19,6 +19,10 @@ interface SelectProps<T extends string = string> {
   onChange: (value: T) => void;
   /** 宽度类名，默认 w-28 */
   widthClass?: string;
+  /** 尺寸模式，小尺寸用于模块筛选条，默认保持设置页现有观感 */
+  size?: 'sm' | 'md';
+  /** 下拉列表高度类名，长列表需要限制高度避免撑破模块布局 */
+  menuMaxHeightClass?: string;
   /** 是否禁用 */
   disabled?: boolean;
 }
@@ -28,6 +32,8 @@ export function Select<T extends string = string>({
   options,
   onChange,
   widthClass = 'w-28',
+  size = 'md',
+  menuMaxHeightClass = 'max-h-64',
   disabled = false,
 }: SelectProps<T>) {
   const [open, setOpen] = useState(false);
@@ -58,6 +64,8 @@ export function Select<T extends string = string>({
   }, [open]);
 
   const selectedOption = options.find(o => o.value === value);
+  const triggerSizeClass = size === 'sm' ? 'px-2.5 py-1.5 rounded-lg text-xs' : 'px-3 py-2 rounded-xl text-sm';
+  const optionSizeClass = size === 'sm' ? 'px-2.5 py-1.5 text-xs' : 'px-3 py-2 text-sm';
 
   return (
     <div ref={containerRef} className={`relative ${widthClass}`}>
@@ -66,7 +74,7 @@ export function Select<T extends string = string>({
         type="button"
         disabled={disabled}
         onClick={() => setOpen(!open)}
-        className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-xl text-sm
+        className={`w-full flex items-center justify-between gap-2 ${triggerSizeClass}
           bg-[var(--bg-card)] border border-[var(--border-color)]
           text-[var(--text-primary)] font-medium
           hover:border-[var(--brand-green)]/50 hover:bg-[var(--bg-hover)]
@@ -75,7 +83,9 @@ export function Select<T extends string = string>({
           ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
           ${open ? 'border-[var(--brand-green)] ring-2 ring-[var(--brand-green)]/20' : ''}`}
       >
-        <span>{selectedOption?.label ?? value}</span>
+        <span className="min-w-0 truncate" title={selectedOption?.label ?? value}>
+          {selectedOption?.label ?? value}
+        </span>
         <ChevronDown
           className={`w-4 h-4 text-[var(--text-muted)] transition-transform duration-200 ${
             open ? 'rotate-180' : ''
@@ -88,9 +98,10 @@ export function Select<T extends string = string>({
         <div
           className={`absolute top-full left-0 mt-1.5 w-full py-1 rounded-xl
             bg-[var(--bg-card)] border border-[var(--border-color)]
-            shadow-lg shadow-black/5 z-50
+            shadow-lg shadow-black/5 z-50 overflow-y-auto ${menuMaxHeightClass}
             animate-in fade-in slide-in-from-top-1 duration-150`}
         >
+          {/* 筛选项可能来自平台/模型类型，数量不可控；截断与滚动能避免下拉层挤压结果区。 */}
           {options.map((option) => {
             const isSelected = option.value === value;
             return (
@@ -101,16 +112,16 @@ export function Select<T extends string = string>({
                   onChange(option.value);
                   setOpen(false);
                 }}
-                className={`w-full flex items-center justify-between px-3 py-2 text-sm
+                className={`w-full flex items-center justify-between gap-2 ${optionSizeClass}
                   transition-colors duration-100
                   ${isSelected
                     ? 'bg-[var(--brand-green)]/10 text-[var(--brand-green)] font-medium'
                     : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
                   }`}
               >
-                <span>{option.label}</span>
+                <span className="min-w-0 truncate" title={option.label}>{option.label}</span>
                 {isSelected && (
-                  <span className="w-1.5 h-1.5 rounded-full bg-[var(--brand-green)]" />
+                  <span className="w-1.5 h-1.5 shrink-0 rounded-full bg-[var(--brand-green)]" />
                 )}
               </button>
             );

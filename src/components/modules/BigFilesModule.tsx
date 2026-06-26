@@ -7,23 +7,23 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { FileBox, Trash2, Loader2, FileWarning, FolderOpen, ExternalLink, StopCircle, Search } from 'lucide-react';
 import { listen } from '@tauri-apps/api/event';
-import { openUrl } from '@tauri-apps/plugin-opener';
 import { ModuleCard } from '../ModuleCard';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { EmptyState } from '../EmptyState';
 import { useToast } from '../Toast';
-import { useDashboard } from '../../contexts/DashboardContext';
+import { useModuleDashboard } from '../../contexts/DashboardContext';
 import { scanLargeFiles, cancelLargeFileScan, deleteFiles, openInFolder, openFile, recordCleanupAction, type CleanupLogEntryInput } from '../../api/commands';
 import { formatSize, formatDate, getRiskLevelColor, getRiskLevelBgColor, getRiskLevelText } from '../../utils/format';
+import { openSearchUrl } from '../../utils/searchEngine';
 import type { LargeFileEntry, LargeFileScanProgress } from '../../types';
+import { shouldSkipInactivePageRender, type ModuleRenderProps } from './moduleProps';
 
 // ============================================================================
 // 组件实现
 // ============================================================================
 
-export function BigFilesModule({ layoutMode = 'cards' }: { layoutMode?: 'cards' | 'pages' }) {
-  const { modules, expandedModule, setExpandedModule, updateModuleState, triggerHealthRefresh, oneClickScanTrigger } = useDashboard();
-  const moduleState = modules.bigFiles;
+export function BigFilesModule({ layoutMode = 'cards', isPageActive = true }: ModuleRenderProps) {
+  const { moduleState, expandedModule, setExpandedModule, updateModuleState, triggerHealthRefresh, oneClickScanTrigger } = useModuleDashboard('bigFiles');
   const { showToast } = useToast();
 
   // 防止重复扫描
@@ -143,8 +143,7 @@ export function BigFilesModule({ layoutMode = 'cards' }: { layoutMode?: 'cards' 
   const handleSearchFile = useCallback(async (path: string) => {
     try {
       // 搜索时带上完整路径，帮助用户在删除前确认文件来源和风险。
-      const query = encodeURIComponent(`Windows 文件 ${path} 可以删除吗`);
-      await openUrl(`https://www.bing.com/search?q=${query}`);
+      await openSearchUrl(`Windows 文件 ${path} 可以删除吗`);
     } catch (err) {
       console.error('搜索文件用途失败:', err);
       showToast({
@@ -274,6 +273,10 @@ export function BigFilesModule({ layoutMode = 'cards' }: { layoutMode?: 'cards' 
   const displayElapsedSeconds = isScanning
     ? scanElapsed
     : Math.round(backendElapsedMs / 1000);
+
+  if (shouldSkipInactivePageRender(layoutMode, isPageActive) && !isDeleting && !showDeleteConfirm) {
+    return null;
+  }
 
   return (
     <>

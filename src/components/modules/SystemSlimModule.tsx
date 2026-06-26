@@ -20,7 +20,7 @@ import { listen } from '@tauri-apps/api/event';
 import { ModuleCard } from '../ModuleCard';
 import { EmptyState } from '../EmptyState';
 import { useToast } from '../Toast';
-import { useDashboard } from '../../contexts/DashboardContext';
+import { useModuleDashboard } from '../../contexts/DashboardContext';
 import {
   getSystemSlimStatus,
   disableHibernation,
@@ -31,6 +31,7 @@ import {
   SystemSlimStatus
 } from '../../api/commands';
 import { formatSize } from '../../utils/format';
+import { shouldSkipInactivePageRender, type ModuleRenderProps } from './moduleProps';
 
 // ============================================================================
 // 配置
@@ -52,9 +53,8 @@ const itemColors: Record<string, { bg: string; text: string }> = {
 // 组件实现
 // ============================================================================
 
-export function SystemSlimModule({ layoutMode = 'cards' }: { layoutMode?: 'cards' | 'pages' }) {
-  const { modules, expandedModule, setExpandedModule, updateModuleState, triggerHealthRefresh, oneClickScanTrigger } = useDashboard();
-  const moduleState = modules.system;
+export function SystemSlimModule({ layoutMode = 'cards', isPageActive = true }: ModuleRenderProps) {
+  const { moduleState, expandedModule, setExpandedModule, updateModuleState, triggerHealthRefresh, oneClickScanTrigger } = useModuleDashboard('system');
   const { showToast } = useToast();
 
   // 用于跟踪是否已处理过当前的一键扫描触发
@@ -154,6 +154,10 @@ export function SystemSlimModule({ layoutMode = 'cards' }: { layoutMode?: 'cards
   }, [status, loadStatus, triggerHealthRefresh, showToast]);
 
   const isExpanded = expandedModule === 'system';
+
+  if (shouldSkipInactivePageRender(layoutMode, isPageActive) && !actionLoading) {
+    return null;
+  }
 
   return (
     <ModuleCard

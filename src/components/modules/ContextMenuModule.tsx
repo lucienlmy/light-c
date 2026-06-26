@@ -20,7 +20,7 @@ import {
 import { ModuleCard } from '../ModuleCard';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { EmptyState } from '../EmptyState';
-import { useDashboard } from '../../contexts/DashboardContext';
+import { useModuleDashboard } from '../../contexts/DashboardContext';
 import {
   scanContextMenu,
   deleteContextMenuEntries,
@@ -30,6 +30,7 @@ import {
   type ContextMenuDeleteRequest,
   type CleanupLogEntryInput,
 } from '../../api/commands';
+import { shouldSkipInactivePageRender, type ModuleRenderProps } from './moduleProps';
 
 // ============================================================================
 // 工具函数
@@ -258,16 +259,14 @@ function EntryRow({ entry, isSelected, onToggle }: EntryRowProps) {
 // 主组件
 // ============================================================================
 
-export function ContextMenuModule({ layoutMode = 'cards' }: { layoutMode?: 'cards' | 'pages' }) {
+export function ContextMenuModule({ layoutMode = 'cards', isPageActive = true }: ModuleRenderProps) {
   const {
-    modules,
+    moduleState,
     expandedModule,
     setExpandedModule,
     updateModuleState,
     oneClickScanTrigger,
-  } = useDashboard();
-
-  const moduleState = modules.contextMenu;
+  } = useModuleDashboard('contextMenu');
   const lastScanTriggerRef = useRef(0);
 
   // ── 本地状态 ──────────────────────────────────────────────────────────────
@@ -282,7 +281,7 @@ export function ContextMenuModule({ layoutMode = 'cards' }: { layoutMode?: 'card
   /** 按 scope 分组折叠状态 */
   const [collapsedScopes, setCollapsedScopes] = useState<Set<string>>(new Set());
   /** 筛选：仅显示无效条目 */
-  const [showInvalidOnly, setShowInvalidOnly] = useState(false);
+  const [showInvalidOnly, setShowInvalidOnly] = useState(true);
 
   // ── 派生数据 ──────────────────────────────────────────────────────────────
 
@@ -500,6 +499,10 @@ export function ContextMenuModule({ layoutMode = 'cards' }: { layoutMode?: 'card
   const allFilteredSelected =
     selectableEntries.length > 0 &&
     selectableEntries.every((e) => selectedIds.has(e.id));
+
+  if (shouldSkipInactivePageRender(layoutMode, isPageActive) && !isDeleting && !showDeleteConfirm) {
+    return null;
+  }
 
   return (
     <>

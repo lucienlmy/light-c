@@ -12,18 +12,18 @@ import { ScanSummary } from '../ScanSummary';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { EmptyState } from '../EmptyState';
 import { useToast } from '../Toast';
-import { useDashboard } from '../../contexts/DashboardContext';
+import { useModuleDashboard } from '../../contexts/DashboardContext';
 import { scanJunkFiles, enhancedDeleteFiles, recordCleanupAction, type EnhancedDeleteResult, type CleanupLogEntryInput } from '../../api/commands';
 import { formatSize } from '../../utils/format';
 import type { ScanResult, FileInfo } from '../../types';
+import { shouldSkipInactivePageRender, type ModuleRenderProps } from './moduleProps';
 
 // ============================================================================
 // 组件实现
 // ============================================================================
 
-export function JunkCleanModule({ layoutMode = 'cards' }: { layoutMode?: 'cards' | 'pages' }) {
-  const { modules, expandedModule, setExpandedModule, updateModuleState, triggerHealthRefresh, oneClickScanTrigger } = useDashboard();
-  const moduleState = modules.junk;
+export function JunkCleanModule({ layoutMode = 'cards', isPageActive = true }: ModuleRenderProps) {
+  const { moduleState, expandedModule, setExpandedModule, updateModuleState, triggerHealthRefresh, oneClickScanTrigger } = useModuleDashboard('junk');
   const { showToast } = useToast();
 
   // 用于跟踪是否已处理过当前的一键扫描触发
@@ -248,6 +248,10 @@ export function JunkCleanModule({ layoutMode = 'cards' }: { layoutMode?: 'cards'
   }, [scanResult]);
 
   const isExpanded = expandedModule === 'junk';
+
+  if (shouldSkipInactivePageRender(layoutMode, isPageActive) && !isDeleting && !showDeleteConfirm) {
+    return null;
+  }
 
   return (
     <>

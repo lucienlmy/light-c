@@ -27,6 +27,18 @@ pub fn clear_local_data() -> Result<(usize, u64), String> {
     crate::data_dir::clear_local_data()
 }
 
+#[tauri::command]
+pub fn list_clearable_data_items() -> Result<Vec<crate::data_dir::ClearableDataItem>, String> {
+    crate::data_dir::list_clearable_data_items()
+}
+
+#[tauri::command]
+pub fn clear_selected_local_data(
+    item_ids: Vec<String>,
+) -> Result<crate::data_dir::ClearLocalDataResult, String> {
+    crate::data_dir::clear_selected_local_data(&item_ids)
+}
+
 /// 打开系统文件夹选择对话框
 #[tauri::command]
 pub async fn pick_folder_dialog(app: tauri::AppHandle) -> Result<Option<String>, String> {

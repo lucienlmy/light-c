@@ -5,7 +5,7 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { HardDrive, Moon, Trash2, Zap, Square } from 'lucide-react';
-import { useDashboard } from '../contexts/DashboardContext';
+import { useDashboardActions, useDashboardSummary } from '../contexts/DashboardContext';
 import { formatSize } from '../utils/format';
 
 // ============================================================================
@@ -101,7 +101,8 @@ interface DashboardHeaderProps {
 // ============================================================================
 
 export function DashboardHeader({ onOneClickScan, onShowWelcome, hideOneClickScan = false }: DashboardHeaderProps) {
-  const { diskInfo, healthData, isLoadingHealth, isAnyScanning, stopAllScans } = useDashboard();
+  const { diskInfo, healthData, isLoadingHealth, isAnyScanning } = useDashboardSummary();
+  const { stopAllScans } = useDashboardActions();
   
   // 动画数字
   const animatedScore = useAnimatedNumber(healthData?.score ?? 0);

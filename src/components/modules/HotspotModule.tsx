@@ -6,16 +6,17 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Flame, Loader2, FolderOpen, Clock, HardDrive, ChevronDown, ChevronRight, Search, ShieldAlert, Shield, Eye, Trash2, XCircle } from 'lucide-react';
-import { openUrl } from '@tauri-apps/plugin-opener';
 import { listen } from '@tauri-apps/api/event';
 import { ModuleCard } from '../ModuleCard';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { EmptyState } from '../EmptyState';
 import { useToast } from '../Toast';
-import { useDashboard, useSettings } from '../../contexts';
+import { useModuleDashboard, useSettings } from '../../contexts';
 import { scanHotspot, cancelHotspotScan, openInFolder, cleanupDirectoryContents, type HotspotScanResult, type HotspotEntry, type HotspotScanProgress } from '../../api/commands';
 import { formatSize } from '../../utils/format';
+import { openSearchUrl } from '../../utils/searchEngine';
 import { DrillDownModal } from './DrillDownModal';
+import { shouldSkipInactivePageRender, type ModuleRenderProps } from './moduleProps';
 
 // ============================================================================
 // 工具函数
@@ -406,9 +407,8 @@ function HotspotItem({ entry, rank, maxSize, isFullScan, onOpenFolder, onCleanup
 // 主组件
 // ============================================================================
 
-export function HotspotModule({ layoutMode = 'cards' }: { layoutMode?: 'cards' | 'pages' }) {
-  const { modules, expandedModule, setExpandedModule, updateModuleState, oneClickScanTrigger, stopScanTrigger } = useDashboard();
-  const moduleState = modules.hotspot;
+export function HotspotModule({ layoutMode = 'cards', isPageActive = true }: ModuleRenderProps) {
+  const { moduleState, expandedModule, setExpandedModule, updateModuleState, oneClickScanTrigger, stopScanTrigger } = useModuleDashboard('hotspot');
   const { showToast } = useToast();
   const { settings } = useSettings();
 
@@ -636,9 +636,7 @@ export function HotspotModule({ layoutMode = 'cards' }: { layoutMode?: 'cards' |
   // 搜索文件夹是否可以删除 - 使用 Tauri opener 插件打开浏览器
   const handleSearch = useCallback(async (path: string) => {
     try {
-      const query = encodeURIComponent(`Windows 文件夹 ${path} 可以删除吗`);
-      const url = `https://www.bing.com/search?q=${query}`;
-      await openUrl(url);
+      await openSearchUrl(`Windows 文件夹 ${path} 可以删除吗`);
     } catch (err) {
       console.error('打开搜索链接失败:', err);
     }
@@ -651,6 +649,10 @@ export function HotspotModule({ layoutMode = 'cards' }: { layoutMode?: 'cards' |
 
   // 最大大小（用于计算占比条）
   const maxSize = scanResult?.entries[0]?.total_size || 0;
+
+  if (shouldSkipInactivePageRender(layoutMode, isPageActive) && !cleanupTarget && !selectedPath) {
+    return null;
+  }
 
   return (
     <ModuleCard

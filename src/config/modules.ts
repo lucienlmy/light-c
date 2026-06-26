@@ -1,5 +1,6 @@
 import type { ComponentType } from 'react';
 import {
+  AiModelsModule,
   BigFilesModule,
   ContextMenuModule,
   DiskGrowthModule,
@@ -15,10 +16,10 @@ import { APP_MODULE_META, type AppModuleId, type LayoutMode } from './moduleMeta
 export interface AppModuleConfig {
   id: AppModuleId;
   label: string;
-  component: ComponentType<{ layoutMode?: LayoutMode }>;
+  component: ComponentType<{ layoutMode?: LayoutMode; isPageActive?: boolean }>;
 }
 
-const moduleComponents: Record<AppModuleId, ComponentType<{ layoutMode?: LayoutMode }>> = {
+const moduleComponents: Record<AppModuleId, ComponentType<{ layoutMode?: LayoutMode; isPageActive?: boolean }>> = {
   'junk-clean': JunkCleanModule,
   'big-files': BigFilesModule,
   'social-clean': SocialCleanModule,
@@ -28,6 +29,7 @@ const moduleComponents: Record<AppModuleId, ComponentType<{ layoutMode?: LayoutM
   'context-menu': ContextMenuModule,
   hotspot: HotspotModule,
   'disk-growth': DiskGrowthModule,
+  'ai-models': AiModelsModule,
 };
 
 export const APP_MODULES: AppModuleConfig[] = APP_MODULE_META.map(moduleMeta => ({

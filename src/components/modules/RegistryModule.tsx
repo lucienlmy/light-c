@@ -12,7 +12,7 @@ import { Database, Loader2, Trash2, CheckCircle2, Shield } from 'lucide-react';
 import { ModuleCard } from '../ModuleCard';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { EmptyState } from '../EmptyState';
-import { useDashboard } from '../../contexts/DashboardContext';
+import { useModuleDashboard } from '../../contexts/DashboardContext';
 import {
   scanRegistryRedundancy,
   deleteRegistryEntries,
@@ -22,14 +22,14 @@ import {
   type RegistryEntry,
   type CleanupLogEntryInput,
 } from '../../api/commands';
+import { shouldSkipInactivePageRender, type ModuleRenderProps } from './moduleProps';
 
 // ============================================================================
 // 主组件
 // ============================================================================
 
-export function RegistryModule({ layoutMode = 'cards' }: { layoutMode?: 'cards' | 'pages' }) {
-  const { modules, expandedModule, setExpandedModule, updateModuleState, triggerHealthRefresh, oneClickScanTrigger } = useDashboard();
-  const moduleState = modules.registry;
+export function RegistryModule({ layoutMode = 'cards', isPageActive = true }: ModuleRenderProps) {
+  const { moduleState, expandedModule, setExpandedModule, updateModuleState, triggerHealthRefresh, oneClickScanTrigger } = useModuleDashboard('registry');
 
   const lastScanTriggerRef = useRef(0);
 
@@ -168,6 +168,10 @@ export function RegistryModule({ layoutMode = 'cards' }: { layoutMode?: 'cards' 
   }, [scanResult, selectedEntries]);
 
   const isExpanded = expandedModule === 'registry';
+
+  if (shouldSkipInactivePageRender(layoutMode, isPageActive) && !isDeleting && !showDeleteConfirm) {
+    return null;
+  }
 
   return (
     <>

@@ -47,6 +47,75 @@ struct DataDirConfig {
     data_dir: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct ClearableDataItem {
+    pub id: String,
+    pub label: String,
+    pub description: String,
+    pub path: String,
+    pub item_type: String,
+    pub exists: bool,
+    pub file_count: usize,
+    pub size: u64,
+    pub warning: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ClearLocalDataResult {
+    pub deleted_files: usize,
+    pub freed_bytes: u64,
+}
+
+struct ClearableDataDefinition {
+    id: &'static str,
+    label: &'static str,
+    description: &'static str,
+    relative_path: &'static str,
+    item_type: ClearableDataType,
+    warning: Option<&'static str>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ClearableDataType {
+    File,
+    DirectoryContents,
+}
+
+const CLEARABLE_DATA_DEFINITIONS: [ClearableDataDefinition; 4] = [
+    ClearableDataDefinition {
+        id: "install_history",
+        label: "安装历史缓存",
+        description: "用于辅助卸载残留识别，删除后会重新学习历史安装路径。",
+        relative_path: "install_history.json",
+        item_type: ClearableDataType::File,
+        warning: Some("可安全清理，但卸载残留模块的历史识别信号会重新建立。"),
+    },
+    ClearableDataDefinition {
+        id: "logs",
+        label: "清理日志",
+        description: "记录历史清理明细，仅用于回看操作记录。",
+        relative_path: "logs",
+        item_type: ClearableDataType::DirectoryContents,
+        warning: None,
+    },
+    ClearableDataDefinition {
+        id: "reg_backups",
+        label: "注册表备份",
+        description: "右键菜单和注册表清理前生成的备份文件。",
+        relative_path: "reg_backups",
+        item_type: ClearableDataType::DirectoryContents,
+        warning: Some("删除后无法再通过这些备份回溯旧注册表清理操作。"),
+    },
+    ClearableDataDefinition {
+        id: "disk_growth_snapshots",
+        label: "全盘分析快照",
+        description: "用于 C 盘全盘分析的增长对比基线和分片明细。",
+        relative_path: "disk_growth_snapshots",
+        item_type: ClearableDataType::DirectoryContents,
+        warning: Some("可安全清理；下次全盘分析会重新建立基线，第二次扫描后才会重新显示变化对比。"),
+    },
+];
+
 // ============================================================================
 // 内部函数
 // ============================================================================
@@ -183,46 +252,132 @@ pub fn set_data_dir(new_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// 清空本地数据：安装历史缓存 + 清理日志 + C 盘全盘分析快照
-///
-/// 【中文说明】
-/// 删除 install_history.json、logs/ 目录下所有日志文件，以及 disk_growth_snapshots/ 快照目录。
-/// 返回 (删除文件数, 释放字节数)。
-pub fn clear_local_data() -> Result<(usize, u64), String> {
+pub fn list_clearable_data_items() -> Result<Vec<ClearableDataItem>, String> {
+    let data_dir = get_data_dir();
+    CLEARABLE_DATA_DEFINITIONS
+        .iter()
+        .map(|definition| build_clearable_data_item(&data_dir, definition))
+        .collect()
+}
+
+pub fn clear_selected_local_data(item_ids: &[String]) -> Result<ClearLocalDataResult, String> {
     let data_dir = get_data_dir();
     let mut file_count = 0usize;
     let mut total_size = 0u64;
 
-    // 删除安装历史缓存
-    let history_file = data_dir.join("install_history.json");
-    if history_file.exists() && history_file.is_file() {
-        if let Ok(meta) = fs::metadata(&history_file) {
-            total_size += meta.len();
+    for item_id in item_ids {
+        let Some(definition) = CLEARABLE_DATA_DEFINITIONS
+            .iter()
+            .find(|definition| definition.id == item_id)
+        else {
+            return Err(format!("未知的本地数据清理项: {}", item_id));
+        };
+
+        let target_path = data_dir.join(definition.relative_path);
+        let (deleted_files, deleted_bytes) = clear_data_item(definition, &target_path)?;
+        file_count += deleted_files;
+        total_size += deleted_bytes;
+    }
+
+    Ok(ClearLocalDataResult {
+        deleted_files: file_count,
+        freed_bytes: total_size,
+    })
+}
+
+/// 清空本地数据：保留旧命令兼容，一次性清理所有白名单项。
+pub fn clear_local_data() -> Result<(usize, u64), String> {
+    let item_ids = CLEARABLE_DATA_DEFINITIONS
+        .iter()
+        .map(|definition| definition.id.to_string())
+        .collect::<Vec<_>>();
+    let result = clear_selected_local_data(&item_ids)?;
+    Ok((result.deleted_files, result.freed_bytes))
+}
+
+fn build_clearable_data_item(
+    data_dir: &Path,
+    definition: &ClearableDataDefinition,
+) -> Result<ClearableDataItem, String> {
+    let target_path = data_dir.join(definition.relative_path);
+    let (file_count, size) = match definition.item_type {
+        ClearableDataType::File => file_usage(&target_path),
+        ClearableDataType::DirectoryContents => directory_contents_usage(&target_path)?,
+    };
+
+    Ok(ClearableDataItem {
+        id: definition.id.to_string(),
+        label: definition.label.to_string(),
+        description: definition.description.to_string(),
+        path: target_path.to_string_lossy().to_string(),
+        item_type: match definition.item_type {
+            ClearableDataType::File => "file",
+            ClearableDataType::DirectoryContents => "directory",
         }
-        fs::remove_file(&history_file).map_err(|e| format!("删除安装历史失败: {}", e))?;
-        file_count += 1;
-        log::info!("已删除安装历史缓存");
+        .to_string(),
+        exists: target_path.exists(),
+        file_count,
+        size,
+        warning: definition.warning.map(str::to_string),
+    })
+}
+
+fn clear_data_item(
+    definition: &ClearableDataDefinition,
+    target_path: &Path,
+) -> Result<(usize, u64), String> {
+    match definition.item_type {
+        ClearableDataType::File => clear_file(target_path),
+        ClearableDataType::DirectoryContents => {
+            // 数据目录入口本身由应用复用，只清空目录内容，避免后续日志/快照写入前还要重新创建父目录。
+            if !target_path.exists() {
+                return Ok((0, 0));
+            }
+            if !target_path.is_dir() {
+                return Err(format!("清理项不是目录: {}", target_path.display()));
+            }
+            let result = clear_directory_contents(target_path)?;
+            log::info!("已清空本地数据目录: {}", definition.relative_path);
+            Ok(result)
+        }
+    }
+}
+
+fn clear_file(path: &Path) -> Result<(usize, u64), String> {
+    if !path.exists() {
+        return Ok((0, 0));
+    }
+    if !path.is_file() {
+        return Err(format!("清理项不是文件: {}", path.display()));
     }
 
-    // 删除所有日志文件，保留目录本身便于后续继续写入日志。
-    let logs_dir = data_dir.join("logs");
-    if logs_dir.exists() && logs_dir.is_dir() {
-        let (deleted_files, deleted_bytes) = clear_directory_contents(&logs_dir)?;
-        file_count += deleted_files;
-        total_size += deleted_bytes;
-        log::info!("已清空日志目录");
+    let size = fs::metadata(path)
+        .map(|metadata| metadata.len())
+        .unwrap_or(0);
+    fs::remove_file(path).map_err(|e| format!("删除文件 {} 失败: {}", path.display(), e))?;
+    Ok((1, size))
+}
+
+fn file_usage(path: &Path) -> (usize, u64) {
+    if !path.is_file() {
+        return (0, 0);
     }
 
-    // C 盘全盘分析快照可安全清理；下次扫描会重新建立基线，不会造成格式兼容问题。
-    let disk_growth_snapshot_dir = data_dir.join("disk_growth_snapshots");
-    if disk_growth_snapshot_dir.exists() && disk_growth_snapshot_dir.is_dir() {
-        let (deleted_files, deleted_bytes) = clear_directory_contents(&disk_growth_snapshot_dir)?;
-        file_count += deleted_files;
-        total_size += deleted_bytes;
-        log::info!("已清空 C 盘全盘分析快照");
+    let size = fs::metadata(path)
+        .map(|metadata| metadata.len())
+        .unwrap_or(0);
+    (1, size)
+}
+
+fn directory_contents_usage(dir: &Path) -> Result<(usize, u64), String> {
+    if !dir.exists() {
+        return Ok((0, 0));
+    }
+    if !dir.is_dir() {
+        return Ok((0, 0));
     }
 
-    Ok((file_count, total_size))
+    directory_usage(dir)
 }
 
 /// 清空指定目录下的所有内容但保留目录本身，避免日志目录等固定入口被删后还要重新创建。

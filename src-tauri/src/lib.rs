@@ -4,6 +4,7 @@
 // ============================================================================
 
 // 模块声明
+mod ai_models;
 mod cleaner;
 mod commands;
 mod data_dir;
@@ -93,6 +94,7 @@ pub fn run() {
             check_leftover_safety,
             // 系统信息
             get_system_info,
+            get_distribution_channel,
             // 清理日志
             record_cleanup_action,
             open_logs_folder,
@@ -117,7 +119,11 @@ pub fn run() {
             get_data_directory,
             set_data_directory,
             clear_local_data,
+            list_clearable_data_items,
+            clear_selected_local_data,
             pick_folder_dialog,
+            // AI 资产分析
+            scan_ai_model_assets,
         ])
         .run(tauri::generate_context!())
         .expect("启动应用程序时发生错误");

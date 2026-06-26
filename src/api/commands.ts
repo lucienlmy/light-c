@@ -15,6 +15,16 @@ import type {
   LargeFileEntry,
 } from '../types';
 
+export type DistributionChannel = 'installer' | 'portable';
+
+/**
+ * 获取当前发行渠道。
+ * 便携版由 exe 同目录的 LightC.portable 标记文件识别，前端据此禁用自动更新安装流程。
+ */
+export async function getDistributionChannel(): Promise<DistributionChannel> {
+  return invoke<DistributionChannel>('get_distribution_channel');
+}
+
 /**
  * 鑾峰彇C鐩樼鐩樹俊鎭? */
 export async function getDiskInfo(): Promise<DiskInfo> {
@@ -1164,6 +1174,61 @@ export async function getDiskGrowthDirectoryDetails(
 }
 
 // ============================================================================
+// AI资产分析 API
+// ============================================================================
+
+/** AI资产中的单个模型或缓存条目 */
+export interface AiModelItem {
+  name: string;
+  size: number;
+  path: string;
+}
+
+/** 按平台或深度发现来源聚合后的 AI资产来源 */
+export interface AiAssetSource {
+  name: string;
+  path: string;
+  total_size: number;
+  model_count: number;
+  models: AiModelItem[];
+}
+
+/** AI资产扫描结果，前端基于它派生首页洞察和列表 */
+export interface AiModelScanResult {
+  total_size: number;
+  total_model_count: number;
+  source_count: number;
+  sources: AiAssetSource[];
+  warnings: string[];
+  scan_duration_ms: number;
+  discovery_mode: 'quick' | 'deep';
+  phase_durations: AiModelPhaseDuration[];
+}
+
+/** AI模型空间扫描阶段耗时，用于解释 MFT 兜底瓶颈 */
+export interface AiModelPhaseDuration {
+  stage: string;
+  label: string;
+  duration_ms: number;
+}
+
+/** AI模型空间扫描实时阶段反馈 */
+export interface AiModelScanProgress {
+  stage: string;
+  message: string;
+  elapsed_ms: number;
+  stage_elapsed_ms: number;
+}
+
+/**
+ * 快速扫描已知 AI 平台目录。
+ * 深度发现由用户显式开启，后端才会追加 MFT 兜底扫描，避免默认行为带来全盘 IO 压力。
+ */
+export async function scanAiModelAssets(enableDeepDiscovery: boolean): Promise<AiModelScanResult> {
+  return invoke<AiModelScanResult>('scan_ai_model_assets', { enableDeepDiscovery });
+}
+
+// ============================================================================
 // 鏁版嵁鐩綍绠＄悊 API
 // ============================================================================
 
@@ -1181,11 +1246,36 @@ export async function setDataDirectory(path: string): Promise<string> {
   return invoke<string>('set_data_directory', { path });
 }
 
+export interface ClearableDataItem {
+  id: string;
+  label: string;
+  description: string;
+  path: string;
+  item_type: 'file' | 'directory';
+  exists: boolean;
+  file_count: number;
+  size: number;
+  warning?: string | null;
+}
+
+export interface ClearLocalDataResult {
+  deleted_files: number;
+  freed_bytes: number;
+}
+
 /**
  * 娓呯┖鏈湴鏁版嵁锛堝畨瑁呭巻鍙茬紦瀛?+ 娓呯悊鏃ュ織锛? * @returns [鍒犻櫎鏂囦欢鏁? 閲婃斁瀛楄妭鏁癩
  */
 export async function clearLocalData(): Promise<[number, number]> {
   return invoke<[number, number]>('clear_local_data');
+}
+
+export async function listClearableDataItems(): Promise<ClearableDataItem[]> {
+  return invoke<ClearableDataItem[]>('list_clearable_data_items');
+}
+
+export async function clearSelectedLocalData(itemIds: string[]): Promise<ClearLocalDataResult> {
+  return invoke<ClearLocalDataResult>('clear_selected_local_data', { itemIds });
 }
 
 /**

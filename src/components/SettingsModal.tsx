@@ -4,9 +4,9 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Settings, MessageSquare, Info, Sun, Moon, Monitor, ExternalLink, RefreshCw, CheckCircle, BookOpen, Shield, AlertTriangle, Cpu, HardDrive, Monitor as MonitorIcon, User, Clock, Zap, FileBox, MessageCircle, Layers, Package, Database, Code2, FolderOpen, History, ChevronRight, MonitorCog, Coffee, Copy, MousePointerClick, ShieldCheck, Rocket, HelpCircle, ClipboardList, ShieldAlert, Trash2, SlidersHorizontal, Download, LayoutGrid, PanelLeft } from 'lucide-react';
+import { AnimatePresence, motion } from 'framer-motion';
+import { X, Settings, MessageSquare, Info, Sun, Moon, Monitor, ExternalLink, RefreshCw, CheckCircle, BookOpen, Shield, AlertTriangle, Cpu, HardDrive, Monitor as MonitorIcon, User, Clock, Zap, FileBox, MessageCircle, Layers, Package, Database, Code2, FolderOpen, History, ChevronRight, MonitorCog, Coffee, Copy, MousePointerClick, ShieldCheck, Rocket, HelpCircle, ClipboardList, ShieldAlert, Trash2, SlidersHorizontal, Download, LayoutGrid, PanelLeft, Search } from 'lucide-react';
 import { Select, type SelectOption } from './ui/Select';
-import { ConfirmDialog } from './ConfirmDialog';
 
 // 赞赏码图片
 import wechatQr from '../assets/r_wechat_qr.jpg';
@@ -17,8 +17,15 @@ import { useTheme, type ThemeMode, useFontSize, FONT_SIZE_CONFIGS, type FontSize
 import { useToast } from './Toast';
 import { Type } from 'lucide-react';
 import { getVersion } from '@tauri-apps/api/app';
-import { getSystemInfo, type SystemInfo, openLogsFolder, openStartupManager, openStorageSettings, getDataDirectory, setDataDirectory, clearLocalData, pickFolderDialog, openInFolder } from '../api/commands';
+import { getSystemInfo, type SystemInfo, openLogsFolder, openStartupManager, openStorageSettings, getDataDirectory, setDataDirectory, listClearableDataItems, clearSelectedLocalData, pickFolderDialog, openInFolder, getDistributionChannel, type ClearableDataItem, type DistributionChannel } from '../api/commands';
 import { formatSize } from '../utils/format';
+import {
+  getStoredSearchEngine,
+  SEARCH_ENGINE_CHANGED_EVENT,
+  SEARCH_ENGINE_OPTIONS,
+  setStoredSearchEngine,
+  type SearchEngine,
+} from '../utils/searchEngine';
 
 type SettingsTab = 'general' | 'features' | 'guide' | 'feedback' | 'about';
 
@@ -150,7 +157,9 @@ function GeneralSettings({ mode, setMode }: { mode: ThemeMode; setMode: (mode: T
   const [dataDir, setDataDir] = useState('');
   const [isChangingDir, setIsChangingDir] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
-  const [clearConfirmStep, setClearConfirmStep] = useState<0 | 1 | 2>(0);
+  const [clearDialogOpen, setClearDialogOpen] = useState(false);
+  const [clearableItems, setClearableItems] = useState<ClearableDataItem[]>([]);
+  const [selectedClearItemIds, setSelectedClearItemIds] = useState<string[]>([]);
 
   // 加载当前数据目录
   useEffect(() => {
@@ -182,20 +191,39 @@ function GeneralSettings({ mode, setMode }: { mode: ThemeMode; setMode: (mode: T
   };
 
   // 清空本地数据
-  const handleClearData = () => {
-    // Tauri WebView 下原生 window.confirm 偶发不显示，改用项目内确认弹窗确保危险操作一定被用户看见。
-    setClearConfirmStep(1);
+  const handleClearData = async () => {
+    try {
+      setIsClearing(true);
+      const items = await listClearableDataItems();
+      setClearableItems(items);
+      // 默认只勾选实际存在且有内容的数据项，避免用户打开弹窗后看到一堆空操作。
+      setSelectedClearItemIds(items.filter(item => item.exists && item.file_count > 0).map(item => item.id));
+      setClearDialogOpen(true);
+    } catch (error) {
+      showToast({
+        type: 'error',
+        title: '读取清理项失败',
+        description: String(error),
+      });
+    } finally {
+      setIsClearing(false);
+    }
   };
 
   const executeClearData = async () => {
+    if (selectedClearItemIds.length === 0) {
+      showToast({ type: 'info', title: '未选择清理项' });
+      return;
+    }
+
     try {
-      setClearConfirmStep(0);
       setIsClearing(true);
-      const [fileCount, freedBytes] = await clearLocalData();
+      const result = await clearSelectedLocalData(selectedClearItemIds);
+      setClearDialogOpen(false);
       showToast({
         type: 'success',
         title: '数据已清空',
-        description: `已删除 ${fileCount} 个文件，释放 ${formatSize(freedBytes)}`,
+        description: `已删除 ${result.deleted_files} 个文件，释放 ${formatSize(result.freed_bytes)}`,
       });
     } catch (error) {
       showToast({
@@ -206,6 +234,12 @@ function GeneralSettings({ mode, setMode }: { mode: ThemeMode; setMode: (mode: T
     } finally {
       setIsClearing(false);
     }
+  };
+
+  const toggleClearItem = (itemId: string) => {
+    setSelectedClearItemIds(prev =>
+      prev.includes(itemId) ? prev.filter(id => id !== itemId) : [...prev, itemId]
+    );
   };
 
   return (
@@ -296,6 +330,8 @@ function GeneralSettings({ mode, setMode }: { mode: ThemeMode; setMode: (mode: T
               ))}
             </div>
           </div>
+
+          <SearchEngineSettings />
         </div>
       </div>
 
@@ -376,7 +412,7 @@ function GeneralSettings({ mode, setMode }: { mode: ThemeMode; setMode: (mode: T
               </div>
               <div className="text-left">
                 <p className="text-sm font-medium text-[var(--text-primary)]">清空本地数据</p>
-                <p className="text-xs text-[var(--text-muted)] mt-0.5">删除安装历史缓存与所有清理日志记录</p>
+                <p className="text-xs text-[var(--text-muted)] mt-0.5">选择性清理日志、备份、快照和历史缓存</p>
               </div>
             </div>
             <ChevronRight className="w-4 h-4 text-[var(--text-muted)] group-hover:text-[var(--text-secondary)] transition-colors" />
@@ -384,27 +420,13 @@ function GeneralSettings({ mode, setMode }: { mode: ThemeMode; setMode: (mode: T
         </div>
       </div>
 
-      <ConfirmDialog
-        isOpen={clearConfirmStep === 1}
-        title="清空本地数据？"
-        description="这会删除安装历史缓存、所有清理日志记录，以及 C 盘全盘分析快照。"
-        warning="此操作不可撤销；快照清理后不会损坏功能，但会失去现有对比基线。"
-        confirmText="继续"
-        cancelText="取消"
-        isDanger
-        onCancel={() => setClearConfirmStep(0)}
-        onConfirm={() => setClearConfirmStep(2)}
-      />
-
-      <ConfirmDialog
-        isOpen={clearConfirmStep === 2}
-        title="再次确认清空？"
-        description="清空 C 盘全盘分析快照后，下一次扫描会重新建立基线，第二次扫描才会重新显示变化对比。"
-        warning="如果你还需要保留当前增长对比记录，请先取消操作。"
-        confirmText="确认清空"
-        cancelText="取消"
-        isDanger
-        onCancel={() => setClearConfirmStep(0)}
+      <ClearLocalDataDialog
+        isOpen={clearDialogOpen}
+        items={clearableItems}
+        selectedIds={selectedClearItemIds}
+        isClearing={isClearing}
+        onToggleItem={toggleClearItem}
+        onCancel={() => setClearDialogOpen(false)}
         onConfirm={executeClearData}
       />
 
@@ -449,6 +471,45 @@ function GeneralSettings({ mode, setMode }: { mode: ThemeMode; setMode: (mode: T
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function SearchEngineSettings() {
+  const [searchEngine, setSearchEngine] = useState<SearchEngine>(() => getStoredSearchEngine());
+
+  useEffect(() => {
+    const handleSearchEngineChange = (event: Event) => {
+      const nextEngine = (event as CustomEvent<SearchEngine>).detail;
+      setSearchEngine(nextEngine);
+    };
+
+    window.addEventListener(SEARCH_ENGINE_CHANGED_EVENT, handleSearchEngineChange);
+    return () => window.removeEventListener(SEARCH_ENGINE_CHANGED_EVENT, handleSearchEngineChange);
+  }, []);
+
+  const handleChange = (engine: SearchEngine) => {
+    setSearchEngine(engine);
+    setStoredSearchEngine(engine);
+  };
+
+  return (
+    <div className="flex items-center justify-between pt-4 border-t border-[var(--border-color)]">
+      <div>
+        <p className="text-sm font-medium text-[var(--text-primary)] flex items-center gap-1.5">
+          <Search className="w-4 h-4 text-[var(--text-muted)]" />
+          搜索引擎
+        </p>
+        <p className="text-xs text-[var(--text-muted)] mt-1">
+          设置各模块搜索按钮打开的默认搜索引擎
+        </p>
+      </div>
+      <Select<SearchEngine>
+        value={searchEngine}
+        options={SEARCH_ENGINE_OPTIONS}
+        onChange={handleChange}
+        widthClass="w-32"
+      />
     </div>
   );
 }
@@ -677,6 +738,154 @@ function FeatureSettings() {
   );
 }
 
+function ClearLocalDataDialog({
+  isOpen,
+  items,
+  selectedIds,
+  isClearing,
+  onToggleItem,
+  onCancel,
+  onConfirm,
+}: {
+  isOpen: boolean;
+  items: ClearableDataItem[];
+  selectedIds: string[];
+  isClearing: boolean;
+  onToggleItem: (itemId: string) => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const selectedItems = items.filter(item => selectedIds.includes(item.id));
+  const selectedSize = selectedItems.reduce((sum, item) => sum + item.size, 0);
+  const selectedFileCount = selectedItems.reduce((sum, item) => sum + item.file_count, 0);
+
+  return createPortal(
+    <AnimatePresence>
+      {isOpen && (
+        // 清理确认会打断用户操作流，入退场动画用于降低突然弹出/消失的割裂感。
+        <motion.div
+          className="fixed inset-0 z-[10050] flex items-center justify-center"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.18 }}
+        >
+          <motion.div
+            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+            onClick={onCancel}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.18 }}
+          />
+          <motion.div
+            className="relative w-[520px] max-w-[92vw] overflow-hidden rounded-2xl border border-[var(--border-color)] bg-[var(--bg-card)] shadow-2xl"
+            initial={{ opacity: 0, y: 12, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 8, scale: 0.97 }}
+            transition={{ type: 'spring', stiffness: 380, damping: 32 }}
+          >
+            <div className="flex items-center justify-between border-b border-[var(--border-color)] px-5 py-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--color-danger)]/10">
+                  <Trash2 className="h-5 w-5 text-[var(--color-danger)]" />
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold text-[var(--text-primary)]">清理本地数据</h3>
+                  <p className="text-xs text-[var(--text-muted)]">只清理下列白名单数据，保留 config.json 和数据目录本身</p>
+                </div>
+              </div>
+              <button
+                onClick={onCancel}
+                className="rounded-lg p-1.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="max-h-[58vh] overflow-y-auto px-5 py-4">
+              <div className="mb-3 rounded-xl border border-amber-500/20 bg-amber-500/10 p-3">
+                <p className="text-xs leading-relaxed text-amber-700 dark:text-amber-300">
+                  这些数据可以安全清理，不会删除应用配置。全盘分析快照被清理后，下次扫描会重新建立基线，第二次扫描后才会重新显示变化对比。
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                {items.map(item => {
+                  const selected = selectedIds.includes(item.id);
+                  const disabled = !item.exists || item.file_count === 0;
+
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      disabled={disabled}
+                      onClick={() => onToggleItem(item.id)}
+                      className={`w-full rounded-xl border p-3 text-left transition ${
+                        selected
+                          ? 'border-[var(--brand-green)] bg-[var(--brand-green)]/10'
+                          : 'border-[var(--border-color)] bg-[var(--bg-main)] hover:border-[var(--brand-green)]/30'
+                      } ${disabled ? 'cursor-not-allowed opacity-55' : ''}`}
+                    >
+                      <div className="flex items-start gap-3">
+                        <span className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+                          selected ? 'border-[var(--brand-green)] bg-[var(--brand-green)]' : 'border-[var(--border-color)]'
+                        }`}>
+                          {selected && <CheckCircle className="h-3 w-3 text-white" />}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="truncate text-sm font-semibold text-[var(--text-primary)]">{item.label}</p>
+                            <span className="shrink-0 text-xs font-semibold tabular-nums text-[var(--brand-green)]">
+                              {formatSize(item.size)}
+                            </span>
+                          </div>
+                          <p className="mt-1 text-xs leading-relaxed text-[var(--text-muted)]">{item.description}</p>
+                          <p className="mt-1 truncate text-[11px] text-[var(--text-faint)]" title={item.path}>
+                            {item.item_type === 'directory' ? '目录内容' : '文件'} · {item.file_count.toLocaleString()} 个文件 · {item.path}
+                          </p>
+                          {item.warning && (
+                            <p className="mt-2 text-[11px] leading-relaxed text-amber-600 dark:text-amber-400">
+                              {item.warning}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between gap-3 border-t border-[var(--border-color)] bg-[var(--bg-main)] px-5 py-4">
+              <p className="text-xs text-[var(--text-muted)]">
+                将删除 {selectedFileCount.toLocaleString()} 个文件，预计释放 {formatSize(selectedSize)}
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={onCancel}
+                  className="rounded-lg px-4 py-2 text-sm font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={onConfirm}
+                  disabled={isClearing || selectedIds.length === 0}
+                  className="inline-flex items-center gap-2 rounded-lg bg-[var(--color-danger)] px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isClearing && <RefreshCw className="h-4 w-4 animate-spin" />}
+                  确认清理
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>,
+    document.body
+  );
+}
+
 // 使用说明 - 微信风格卡片
 function GuideSettings() {
   return (
@@ -783,34 +992,11 @@ function GuideSettings() {
               大目录分析
             </p>
             <p className="text-xs text-[var(--text-muted)] leading-relaxed pl-6">
-              双模式扫描引擎：<span className="text-[var(--brand-green)] font-medium">默认模式</span>深度分析 AppData 目录（快速定位用户数据热点），
-              <span className="text-[var(--brand-green)] font-medium">深度扫描模式</span>覆盖 C 盘全部一级目录（全盘摸排）。
-              扫描自动标记<span className="text-[var(--color-warning)] font-medium">临时缓存</span>和<span className="text-[var(--color-danger)] font-medium">系统保护</span>目录，辅助安全决策。
+              默认分析 AppData 用户数据热点；深度扫描会覆盖 C 盘主要目录。管理员权限下优先使用
+              <span className="text-[var(--brand-green)] font-medium"> NTFS MFT</span>，失败时自动降级遍历。
             </p>
             <p className="text-xs text-[var(--text-muted)] leading-relaxed pl-6 mt-2">
-              <span className="text-[var(--brand-green)] font-medium">MFT 直读引擎（v2.5 新特性）：</span>
-              以管理员身份运行时，深度扫描自动启用<span className="text-[var(--brand-green)] font-medium"> NTFS MFT 直读</span>技术，
-              绕开文件系统 API 直接读取主文件表，实现类似 WizTree 的<span className="text-[var(--brand-green)] font-medium">秒级全盘扫描</span>。
-              非管理员或非 NTFS 文件系统时自动降级为常规遍历，无需用户干预。
-              扫描中前端会显示当前使用的引擎类型（MFT 直读 / 常规遍历）。
-            </p>
-            <p className="text-xs text-[var(--text-muted)] leading-relaxed pl-6 mt-2">
-              <span className="text-[var(--brand-green)] font-medium">树形层级展示：</span>结果以递归父子树呈现，渐进缩进 + L&#123;n&#125; 深度标签直观展示目录层级关系。
-              每层最多展开前 <span className="font-medium">3</span> 个最大子目录。展示深度可在<span className="text-[var(--brand-green)] font-medium">功能设置</span>中调节（2-4 层），
-              实际扫描深度固定为 6 层以确保覆盖率。
-            </p>
-            <p className="text-xs text-[var(--text-muted)] leading-relaxed pl-6 mt-2">
-              <span className="text-[var(--brand-green)] font-medium">热点展开：</span>全盘扫描中，容器级大目录（
-              <span className="font-medium">&gt;20GB</span> 或系统保护目录）自动展开为子目录参与排名竞争，
-              避免 Windows、Program Files 等"不可操作"目录霸占排行榜。
-            </p>
-            <p className="text-xs text-[var(--text-muted)] leading-relaxed pl-6 mt-2">
-              <span className="text-[var(--brand-green)] font-medium">无限下钻弹窗：</span>点击目录右侧 <span className="font-medium">▶</span> 按钮进入沉浸式模态框，
-              支持任意层级深入探索子目录结构。顶部完整路径面包屑导航可快速回溯，按 <span className="font-medium">ESC</span> 快速关闭。
-            </p>
-            <p className="text-xs text-[var(--text-muted)] leading-relaxed pl-6 mt-2">
-              <span className="text-[var(--brand-green)] font-medium">大小阈值：</span>可在<span className="text-[var(--brand-green)] font-medium">功能设置</span>中调节最低展示大小（10-500MB），
-              低于阈值的目录不显示，有效减少结果噪音。
+              结果支持树形展示、热点下钻和最低大小阈值过滤；系统保护目录会被标记，深度扫描结果默认只用于定位，不建议直接当作可删除项。
             </p>
           </div>
           <div>
@@ -823,20 +1009,19 @@ function GuideSettings() {
               该能力需要管理员权限；首次扫描会建立基准快照，第二次扫描开始展示新增、减少和明显变化的目录。
             </p>
             <p className="text-xs text-[var(--text-muted)] leading-relaxed pl-6 mt-2">
-              <span className="text-[var(--brand-green)] font-medium">变化定位：</span>
-              每次扫描会与上次快照对比，计算 C 盘净新增/净减少空间，并按变化量列出对应目录、当前大小、变化级别和原因提示。
+              它只做空间变化定位，不提供一键删除。扫描耗时主要取决于文件数量、$MFT 体积、硬盘类型和安全软件实时扫描。
+            </p>
+          </div>
+          <div>
+            <p className="text-sm font-medium text-[var(--text-primary)] mb-2 flex items-center gap-2">
+              <Cpu className="w-4 h-4 text-[var(--brand-green)]" />
+              AI 模型空间
             </p>
             <p className="text-xs text-[var(--text-muted)] leading-relaxed pl-6 mt-2">
-              <span className="text-[var(--brand-green)] font-medium">性能边界：</span>
-              扫描速度主要取决于文件数量、$MFT 体积、硬盘类型和安全软件实时扫描。容量几个 TB 的 C 盘也能工作，但文件记录越多，MFT 枚举、路径重建和快照分片写入越耗时。
+              自动分析 Ollama、LM Studio、ComfyUI、HuggingFace 和深度发现来源中的模型资产，优先读取平台配置和标准目录，展示总占用、最大模型、平台占比和类型分布。
             </p>
             <p className="text-xs text-[var(--text-muted)] leading-relaxed pl-6 mt-2">
-              <span className="text-[var(--brand-green)] font-medium">首次预热：</span>
-              应用启动后第一次 MFT 扫描可能较慢，属于 Windows 文件系统缓存尚未预热的正常现象；完成一次 MFT 扫描后，同类模块通常会明显变快。
-            </p>
-            <p className="text-xs text-[var(--text-muted)] leading-relaxed pl-6 mt-2">
-              <span className="text-[var(--brand-green)] font-medium">只做分析：</span>
-              全盘变化不等同于可删除项，因此结果页只提供打开目录继续排查，不提供一键清理，避免误删系统或应用数据。
+              默认不会全盘扫描；绿色版 llama.cpp、Pinokio 或自建目录可开启<span className="text-[var(--brand-green)] font-medium">深度发现</span>，用 MFT 按模型文件特征补漏。该模块只做分析和定位，不提供删除模型操作。
             </p>
           </div>
         </div>
@@ -1093,6 +1278,7 @@ function AboutSettings() {
   const [appVersion, setAppVersion] = useState('');
   const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null);
   const [loadingSystemInfo, setLoadingSystemInfo] = useState(true);
+  const [distributionChannel, setDistributionChannel] = useState<DistributionChannel>('installer');
 
   // 获取应用版本号和系统信息
   useEffect(() => {
@@ -1103,6 +1289,11 @@ function AboutSettings() {
       .then(setSystemInfo)
       .catch(err => console.error('获取系统信息失败:', err))
       .finally(() => setLoadingSystemInfo(false));
+
+    // 便携版使用 zip 覆盖更新，关于页需要把入口文案改成网盘下载，避免误导用户走安装器更新。
+    getDistributionChannel()
+      .then(setDistributionChannel)
+      .catch(err => console.error('获取发行渠道失败:', err));
   }, []);
 
   return (
@@ -1120,7 +1311,9 @@ function AboutSettings() {
             <div>
               <h3 className="text-lg font-semibold text-[var(--text-primary)]">LightC</h3>
               <p className="text-sm text-[var(--text-muted)]">Windows C盘智能清理工具</p>
-              <p className="text-xs text-[var(--text-faint)] mt-1">版本 {appVersion || '...'}</p>
+              <p className="text-xs text-[var(--text-faint)] mt-1">
+                版本 {appVersion || '...'} · {distributionChannel === 'portable' ? '便携版' : '安装版'}
+              </p>
             </div>
           </div>
           {/* 检查更新按钮 */}
@@ -1129,9 +1322,13 @@ function AboutSettings() {
             className="mt-3 w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-[var(--brand-green)] bg-[var(--brand-green)]/10 rounded-xl hover:bg-[var(--brand-green)]/20 transition-colors"
           >
             <RefreshCw className="w-4 h-4" />
-            检查更新
+            {distributionChannel === 'portable' ? '网盘下载新版' : '检查更新'}
           </button>
-          <p className="text-xs text-[var(--text-faint)] mt-3">温馨提示：更新源为GitHub，国内可能会出现间歇性DNS污染，如果失败可以稍后重试。</p>
+          <p className="text-xs text-[var(--text-faint)] mt-3">
+            {distributionChannel === 'portable'
+              ? '便携版不会自动安装更新，推荐从网盘下载新版 zip 后覆盖当前目录，GitHub 作为备用渠道。'
+              : '温馨提示：更新源为GitHub，国内可能会出现间歇性DNS污染，如果失败可以稍后重试。'}
+          </p>
         </div>
       </div>
 
