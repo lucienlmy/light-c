@@ -16,6 +16,16 @@ import type {
 } from '../types';
 
 export type DistributionChannel = 'installer' | 'portable';
+export type VerifyIntegrityStatus = 'verified' | 'failed' | 'network_error' | 'release_unavailable';
+
+export interface VerifyIntegrityResult {
+  verified: boolean;
+  status: VerifyIntegrityStatus;
+  version: string;
+  channel: string;
+  message: string;
+  official_url: string;
+}
 
 /**
  * 获取当前发行渠道。
@@ -23,6 +33,14 @@ export type DistributionChannel = 'installer' | 'portable';
  */
 export async function getDistributionChannel(): Promise<DistributionChannel> {
   return invoke<DistributionChannel>('get_distribution_channel');
+}
+
+/**
+ * 校验当前 LightC.exe 是否能通过官方 minisign 签名验证。
+ * 网络失败由后端转换为 network_error，便于前端给出不同于篡改风险的提示。
+ */
+export async function verifyIntegrity(): Promise<VerifyIntegrityResult> {
+  return invoke<VerifyIntegrityResult>('verify_integrity');
 }
 
 /**

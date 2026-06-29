@@ -118,13 +118,8 @@ export function LeftoversModule({ layoutMode = 'cards', isPageActive = true }: M
       const result = await scanUninstallLeftovers();
       setScanResult(result);
 
-      // 默认仅勾选高置信度残留（HighConfidenceLeftover）
-      const defaultSelected = new Set(
-        result.leftovers
-          .filter(l => l.detection_category === 'HighConfidenceLeftover')
-          .map(l => l.path)
-      );
-      setSelectedPaths(defaultSelected);
+      // 卸载残留属于事后推断，即使高置信也可能误伤仍在使用的数据，因此首版结果全部交给用户主动确认。
+      setSelectedPaths(new Set());
 
       updateModuleState('leftovers', {
         status: 'done',
@@ -518,7 +513,7 @@ export function LeftoversModule({ layoutMode = 'cards', isPageActive = true }: M
                   {highConfidenceCount > 0 && <span className="text-[var(--color-danger)] font-medium"> {highConfidenceCount} 个高置信度残留</span>}
                   {highConfidenceCount > 0 && suspiciousCount > 0 && '、'}
                   {suspiciousCount > 0 && <span className="text-[var(--color-warning)] font-medium">{suspiciousCount} 个可疑项</span>}
-                  。已默认勾选高置信度条目，可疑项请自行判断。
+                  。事后扫描无法 100% 准确，结果默认不勾选，请结合路径、大小和软件使用情况自行验证。
                 </p>
               </div>
             </div>

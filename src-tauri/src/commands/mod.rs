@@ -20,6 +20,7 @@ mod scan;
 mod social;
 mod system;
 mod tools;
+mod verify;
 
 // 公共类型（供前端和其他模块使用）
 pub use ai_models::*;
@@ -36,3 +37,4 @@ pub use scan::*;
 pub use social::*;
 pub use system::*;
 pub use tools::*;
+pub use verify::*;

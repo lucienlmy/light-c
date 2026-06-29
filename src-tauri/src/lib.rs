@@ -95,6 +95,7 @@ pub fn run() {
             // 系统信息
             get_system_info,
             get_distribution_channel,
+            verify_integrity,
             // 清理日志
             record_cleanup_action,
             open_logs_folder,

@@ -50,11 +50,13 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: 'LightC v2.10.1'
+          releaseName: 'LightC v2.10.2'
           releaseBody: |
             ## 更新内容
-            - 修复“AI 模型空间”类型柱状图截断长尾类型导致总量展示不完整的问题
-            - 简化设置页“卸载残留”说明，强调事后检测并非 100% 准确，清理前需自行确认
+            - Release 额外上传 download.json，便携版更新和“安全与校验”页会动态读取作者网盘等官方渠道
+            - 卸载残留扫描结果默认不再勾选，强调事后检测无法 100% 准确，需要用户自行验证后再清理
+            - 便携版手动更新优先打开 download.json 中的作者网盘链接，读取失败时降级到 GitHub Releases
+            - 保留官方完整性校验，并上传 LightC_installer_exe.sig / LightC_portable_exe.sig 用于校验当前 exe
 
             请查看 [更新日志](https://github.com/Chunyu33/light-c/blob/main/CHANGELOG.md) 了解详细版本变更。
 
@@ -67,6 +69,11 @@ jobs:
 
       - name: Create portable package
         shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           $ReleaseDir = "src-tauri\target\release"
           $PortableDir = "portable_temp"
@@ -103,9 +110,38 @@ jobs:
             Write-Host "  Copied: resources/" -ForegroundColor White
           }
 
+          # 官方下载渠道不写死在前端，随 Release 上传 download.json，便于后续调整网盘地址。
+          $DownloadConfig = [ordered]@{
+            githubReleasesUrl = "https://github.com/Chunyu33/light-c/releases"
+            netDiskUrl = "https://pan.quark.cn/s/bce8f722bf33"
+            bilibiliUrl = "https://space.bilibili.com/387797235"
+            douyinUrl = "https://www.douyin.com/search/Evan%E7%9A%84%E5%83%8F%E7%B4%A0%E7%A9%BA%E9%97%B4"
+          }
+          $DownloadConfig | ConvertTo-Json | Out-File -FilePath "download.json" -Encoding utf8
+          Write-Host "  Created: download.json" -ForegroundColor Green
+
           # 压缩
           Compress-Archive -Path "$PortableDir\*" -DestinationPath $ZipName -Force
           Write-Host "  Created: $ZipName" -ForegroundColor Green
+
+          # 安装版和便携版复用同一个 LightC.exe；运行时校验当前 exe 字节，因此为 exe 单独生成签名资产。
+          $SignatureOutput = npx tauri signer sign "$PortableDir\LightC.exe"
+          $GeneratedSigPath = "$PortableDir\LightC.exe.sig"
+          if (Test-Path $GeneratedSigPath) {
+            $SignatureText = Get-Content -Raw -Path $GeneratedSigPath
+            $SignatureBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($SignatureText))
+          } else {
+            # CLI 正常会生成 .sig 文件；这里兜底解析 stdout 中的 Public signature，避免把说明文字写进签名资产。
+            $SignatureBase64 = ($SignatureOutput -split "`r?`n" | Where-Object { $_ -match '^[A-Za-z0-9+/=]+$' } | Select-Object -Last 1)
+            if (-not $SignatureBase64) {
+              Write-Host "Error: signature output not found" -ForegroundColor Red
+              exit 1
+            }
+          }
+          $SignatureBase64 | Out-File -FilePath "LightC_installer_exe.sig" -Encoding utf8 -NoNewline
+          $SignatureBase64 | Out-File -FilePath "LightC_portable_exe.sig" -Encoding utf8 -NoNewline
+          Write-Host "  Created: LightC_installer_exe.sig" -ForegroundColor Green
+          Write-Host "  Created: LightC_portable_exe.sig" -ForegroundColor Green
 
           # 清理临时目录
           Remove-Item $PortableDir -Recurse -Force
@@ -118,12 +154,15 @@ jobs:
         shell: pwsh
         run: |
           $ZipPath = "LightC_portable_x64.zip"
-          if (Test-Path $ZipPath) {
-            Write-Host "Uploading $ZipPath to release..." -ForegroundColor Cyan
-            gh release upload ${{ github.ref_name }} $ZipPath --clobber
+          $InstallerSigPath = "LightC_installer_exe.sig"
+          $PortableSigPath = "LightC_portable_exe.sig"
+          $DownloadConfigPath = "download.json"
+          if ((Test-Path $ZipPath) -and (Test-Path $InstallerSigPath) -and (Test-Path $PortableSigPath) -and (Test-Path $DownloadConfigPath)) {
+            Write-Host "Uploading portable assets to release..." -ForegroundColor Cyan
+            gh release upload ${{ github.ref_name }} $ZipPath $InstallerSigPath $PortableSigPath $DownloadConfigPath --clobber
             Write-Host "Upload done!" -ForegroundColor Green
           } else {
-            Write-Host "Error: $ZipPath not found" -ForegroundColor Red
+            Write-Host "Error: portable zip, exe signatures or download config not found" -ForegroundColor Red
             exit 1
           }
         env:

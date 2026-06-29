@@ -12,6 +12,7 @@ import { openUrl } from '@tauri-apps/plugin-opener';
 import { getVersion } from '@tauri-apps/api/app';
 import { useToast } from './Toast';
 import { getDistributionChannel, type DistributionChannel } from '../api/commands';
+import { getOfficialDownloadConfig } from '../utils/downloadConfig';
 
 // ============================================================================
 // 类型定义
@@ -28,10 +29,6 @@ interface UpdateModalProps {
   /** 是否在启动时自动检查 */
   autoCheck?: boolean;
 }
-
-// 网盘更新（推荐）
-const NET_DISK_URL = 'https://pan.quark.cn/s/bce8f722bf33';
-const RELEASES_URL = 'https://github.com/Chunyu33/light-c/releases';
 
 // ============================================================================
 // 错误信息映射
@@ -129,18 +126,22 @@ export function UpdateModal({ autoCheck = true }: UpdateModalProps) {
     if (currentDistributionChannel === 'portable') {
       if (source === 'manual') {
         try {
-          await openUrl(NET_DISK_URL);
+          const downloadConfig = await getOfficialDownloadConfig();
+          const targetUrl = downloadConfig.netDiskUrl ?? downloadConfig.githubReleasesUrl;
+          await openUrl(targetUrl);
           showToast({
             type: 'info',
-            title: '已打开网盘下载页',
-            description: '便携版推荐从网盘下载新版 zip 后覆盖当前目录；GitHub Releases 可作为备用渠道。',
+            title: downloadConfig.netDiskUrl ? '已打开网盘下载页' : '已打开 GitHub Releases',
+            description: downloadConfig.netDiskUrl
+              ? '便携版推荐从作者发布的网盘下载新版 zip 后覆盖当前目录；GitHub Releases 可作为备用渠道。'
+              : '未读取到网盘下载配置，已打开 GitHub Releases 作为官方备用渠道。',
           });
         } catch (error) {
-          console.error('打开网盘下载页失败:', error);
+          console.error('打开便携版下载页失败:', error);
           showToast({
             type: 'error',
-            title: '打开网盘失败',
-            description: `请手动访问网盘下载新版便携包，备用渠道：${RELEASES_URL}`,
+            title: '打开下载页失败',
+            description: '请手动访问 GitHub Releases 下载新版便携包。',
           });
         }
       }

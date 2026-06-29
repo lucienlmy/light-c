@@ -80,7 +80,7 @@
 ### 🎯 深度卸载残留清理（置信度评分引擎）
 - **置信度评分模型**：基线 0.0，综合卸载程序残留、历史安装路径、可执行文件、长时间未修改等正向信号，并用当前已安装应用映射、DisplayName 命中、通用目录、ProgramData、共享厂商目录等保护信号降权；score ≥ 0.75 为高置信度残留，0.40~0.75 为可疑项
 - **结构化应用映射**：从注册表 Uninstall 键提取 InstallLocation 末级/倒数第二级目录名构建精确映射，不再拆分 DisplayName token，杜绝短词碰撞误判
-- **保守默认勾选**：卸载后残留无法做到 100% 权威判断，只有高置信度结果默认勾选；可疑项保留展示但需要用户结合路径和软件使用情况手动确认
+- **保守默认选择**：卸载后残留无法做到 100% 权威判断，所有结果默认不勾选；高置信度只作为优先提示，用户需要结合路径和软件使用情况手动确认
 - **预过滤降噪**：包名格式目录（`com.xxx.yyy`）和纯版本号目录（`1.2.3.4`、`v2.0`）在评分前直接跳过
 - **结构化白名单**：`Exact` / `Prefix` / `Pattern` 三种规则，禁止全局 `contains` 匹配
 - **虚拟磁盘识别**：可识别常见虚拟磁盘文件，同时自动排除 WSL2、Docker 等已知应用环境，避免误删系统或开发数据
@@ -164,8 +164,8 @@
 
 ### 🔐 安全与校验
 - **官方版本安全声明**：设置中独立选项卡，警示第三方打包风险（捆绑插件、主页劫持、后门程序）
-- **一键校验工具**：自动生成当前版本的 PowerShell/CMD 校验命令，点击即复制
-- **版权与渠道声明**：首页底部及设置中明确标注官方发布渠道（GitHub Releases、B站 @Evan的像素空间）
+- **一键完整性校验**：设置 → 安全与校验 可直接验证当前 LightC.exe 是否通过官方 ed25519 签名；安装版和便携版分别读取 Release 中的 `LightC_installer_exe.sig` / `LightC_portable_exe.sig`
+- **版权与渠道声明**：首页底部及设置中明确标注官方发布渠道（GitHub Releases、当前 Release 的 `download.json` 网盘链接、B站/抖音 @Evan的像素空间），并提示第三方转载、网盘引流和二次打包风险
 
 ---
 
@@ -441,12 +441,16 @@ npm run tauri build
    - `LightC_x.x.x_x64-setup.nsis.zip.sig`
    - `latest.json`（构建时自动生成）
    - `LightC_portable_x64.zip`（便携包内包含 `LightC.portable` 标记文件，用于禁用安装器式自动更新）
+   - `LightC_installer_exe.sig`（安装版用于校验当前 `LightC.exe` 的官方签名，格式与 updater 的 base64 签名字符串一致）
+   - `LightC_portable_exe.sig`（便携版解压后用于校验当前 `LightC.exe` 的官方签名，格式与 updater 的 base64 签名字符串一致）
+   - `download.json`（官方渠道配置，便携版更新入口和设置页会动态读取作者网盘等链接）
 
 ### 便携版更新策略
 
 - 安装版保留 Tauri 自动更新，继续使用 `latest.json` 和签名包完成更新。
+- 完整性校验不复用更新包签名，而是读取当前版本 Release 中的 exe 专用签名资产，避免把 zip/updater 包签名误用于运行中 exe。
 - 便携版由发布流程写入 `LightC.portable` 标记文件，运行时识别后不会自动弹出更新安装器。
-- 便携版“检查更新”入口会优先打开网盘下载页，用户下载新版 zip 后覆盖当前目录即可；GitHub Releases 保留为备用官方渠道。
+- 便携版“检查更新”入口会优先读取 Release 的 `download.json` 并打开作者网盘下载页，用户下载新版 zip 后覆盖当前目录即可；读取失败时降级到 GitHub Releases。
 
 ---
 
