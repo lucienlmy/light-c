@@ -9,6 +9,8 @@ use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize};
 use std::process::Command;
 
 const POWERSHELL_TIMEOUT_SECONDS: u64 = 12;
+#[cfg(target_os = "windows")]
+const HIDDEN_PROCESS_FLAGS: u32 = 0x08000000 | 0x00000008;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct DiskHealthInfo {
@@ -174,13 +176,16 @@ $partitions = @(Get-CimInstance -Namespace 'root/Microsoft/Windows/Storage' -Cla
         .args([
             "-NoProfile",
             "-NonInteractive",
+            "-WindowStyle",
+            "Hidden",
             "-ExecutionPolicy",
             "Bypass",
             "-Command",
             script,
         ])
-        // PowerShell 是控制台程序；显式禁止创建控制台窗口，避免检测时闪现蓝色窗口。
-        .creation_flags(0x08000000)
+        // release 包是 Windows GUI 子系统；DETACHED_PROCESS 强制脱离父控制台，
+        // CREATE_NO_WINDOW 继续兜底，避免管理员环境下 PowerShell 创建可见窗口。
+        .creation_flags(HIDDEN_PROCESS_FLAGS)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()

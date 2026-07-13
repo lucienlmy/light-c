@@ -18,6 +18,8 @@ use std::sync::{LazyLock, Mutex};
 use walkdir::WalkDir;
 
 const DRIVER_BACKUP_DIR: &str = "driver_backups";
+#[cfg(target_os = "windows")]
+const HIDDEN_PROCESS_FLAGS: u32 = 0x08000000 | 0x00000008;
 
 // 删除操作会修改系统 Driver Store，串行化后端请求可以避免两个清理任务交叉备份或删除。
 static DRIVER_DELETE_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
@@ -929,8 +931,9 @@ where
 
         let output = Command::new(pnputil_path())
             .args(arguments)
-            // pnputil 是控制台程序；检测和删除都复用该入口，统一隐藏其窗口避免打断用户操作。
-            .creation_flags(0x08000000)
+            // release 包是 Windows GUI 子系统；DETACHED_PROCESS 强制脱离父控制台，
+            // CREATE_NO_WINDOW 继续兜底，避免管理员环境下 pnputil 创建可见窗口。
+            .creation_flags(HIDDEN_PROCESS_FLAGS)
             .output()
             .map_err(|error| format!("启动 pnputil 失败: {}", error))?;
         return Ok(CommandResult {
