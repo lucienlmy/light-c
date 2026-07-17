@@ -50,13 +50,16 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: 'LightC v2.12.1'
+          releaseName: 'LightC v2.12.2'
           releaseBody: |
             ## 更新内容
-            - 修复回收站扫描与清理问题
-            - 修复扫描路径匹配问题
+            - 便携版配置、运行数据和 WebView2 界面数据跟随程序目录保存
+            - 兼容旧版 AppData 数据、旧便携 marker 和旧配置文件
+            - 数据管理设置页支持中间省略配置路径并一键定位配置文件
+            - 驱动检测 Windows 10 枚举兼容：支持中文系统字段、字段名与冒号之间的空格，以及无 BOM UTF-16 输出
+            - 应用图标补充 48x48 图标
 
-            请查看 [更新日志](https://github.com/Chunyu33/light-c/blob/main/CHANGELOG.md) 了解详细版本变更。
+            请查看 [CHANGELOG.md](https://github.com/Chunyu33/light-c/blob/main/CHANGELOG.md) 了解详细版本变更。
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: true
@@ -80,6 +83,10 @@ jobs:
           # 必须在 WebView2 离线包二次构建前签名；后续 tauri build 会覆盖 target\release\LightC.exe。
           Copy-Item $ReleaseExe $PreservedInstallerExe -Force
           $SignatureOutput = npx tauri signer sign $ReleaseExe
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "Error: installer exe signing failed" -ForegroundColor Red
+            exit $LASTEXITCODE
+          }
           $GeneratedSigPath = "$ReleaseExe.sig"
           if (Test-Path $GeneratedSigPath) {
             $SignatureText = Get-Content -Raw -Path $GeneratedSigPath
@@ -155,6 +162,10 @@ jobs:
           }
 
           $SignatureOutput = npx tauri signer sign $OfflineRuntimeExe
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "Error: WebView2 offline exe signing failed" -ForegroundColor Red
+            exit $LASTEXITCODE
+          }
           $GeneratedSigPath = "$OfflineRuntimeExe.sig"
           if (Test-Path $GeneratedSigPath) {
             $SignatureText = Get-Content -Raw -Path $GeneratedSigPath
@@ -203,9 +214,16 @@ jobs:
           Copy-Item $PortableSourceExe "$PortableDir\LightC.exe" -Force
           Write-Host "  Copied: LightC.exe" -ForegroundColor White
 
-          # 便携版与安装版复用同一个 exe，通过 marker 让运行时禁用安装器式自动更新。
+          # 旧 marker 保留给旧版本兼容；新版同时读取带 schema 的 manifest 来决定数据目录布局。
           Set-Content -Path "$PortableDir\LightC.portable" -Value "portable" -Encoding UTF8
           Write-Host "  Created: LightC.portable" -ForegroundColor White
+          $PortableManifest = [ordered]@{
+            schema_version = 1
+            mode = "portable"
+            data_layout = "relative"
+          }
+          $PortableManifest | ConvertTo-Json | Out-File -FilePath "$PortableDir\LightC.portable.json" -Encoding utf8
+          Write-Host "  Created: LightC.portable.json" -ForegroundColor White
 
           # DLL 文件
           $DllFiles = Get-ChildItem -Path $ReleaseDir -Filter "*.dll" -ErrorAction SilentlyContinue
@@ -236,8 +254,12 @@ jobs:
           Compress-Archive -Path "$PortableDir\*" -DestinationPath $ZipName -Force
           Write-Host "  Created: $ZipName" -ForegroundColor Green
 
-          # 便携版运行时会读取 LightC.portable marker，因此单独生成便携版 exe 签名资产。
+          # 签名对象必须是最终便携包内的 LightC.exe；manifest 不参与 exe 签名，避免改变现有校验链路。
           $SignatureOutput = npx tauri signer sign "$PortableDir\LightC.exe"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "Error: portable exe signing failed" -ForegroundColor Red
+            exit $LASTEXITCODE
+          }
           $GeneratedSigPath = "$PortableDir\LightC.exe.sig"
           if (Test-Path $GeneratedSigPath) {
             $SignatureText = Get-Content -Raw -Path $GeneratedSigPath

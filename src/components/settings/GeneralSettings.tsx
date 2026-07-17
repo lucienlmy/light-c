@@ -4,11 +4,11 @@
 
 import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ClipboardList, ChevronRight, FolderOpen, HardDrive, History, LayoutGrid, MonitorCog, RefreshCw, Rocket, Search, Trash2, Type } from 'lucide-react';
+import { CheckCircle2, ClipboardList, ChevronRight, FolderOpen, HardDrive, History, Info, LayoutGrid, MonitorCog, RefreshCw, Rocket, Search, Trash2, Type } from 'lucide-react';
 import { Select } from '../ui/Select';
 import { useFontSize, CUSTOM_FONT_SIZE_MIN, CUSTOM_FONT_SIZE_MAX, useSettings, type ThemeMode } from '../../contexts';
 import { useToast } from '../Toast';
-import { clearSelectedLocalData, getDataDirectory, listClearableDataItems, openInFolder, openLogsFolder, openStartupManager, openStorageSettings, pickFolderDialog, setDataDirectory, type ClearableDataItem } from '../../api/commands';
+import { clearSelectedLocalData, getStorageLocationInfo, listClearableDataItems, migrateLegacyPortableData, openInFolder, openLogsFolder, openStartupManager, openStorageSettings, pickFolderDialog, setDataDirectory, type ClearableDataItem, type StorageLocationInfo } from '../../api/commands';
 import { formatSize } from '../../utils/format';
 import { getStoredSearchEngine, SEARCH_ENGINE_CHANGED_EVENT, SEARCH_ENGINE_OPTIONS, setStoredSearchEngine, type SearchEngine } from '../../utils/searchEngine';
 import { ClearLocalDataDialog } from './ClearLocalDataDialog';
@@ -19,7 +19,9 @@ export function GeneralSettings({ mode, setMode }: { mode: ThemeMode; setMode: (
   const { settings, updateSettings } = useSettings();
   const { showToast } = useToast();
   const [dataDir, setDataDir] = useState('');
+  const [storageInfo, setStorageInfo] = useState<StorageLocationInfo | null>(null);
   const [isChangingDir, setIsChangingDir] = useState(false);
+  const [isMigratingLegacyData, setIsMigratingLegacyData] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
   const [clearDialogOpen, setClearDialogOpen] = useState(false);
   const [clearableItems, setClearableItems] = useState<ClearableDataItem[]>([]);
@@ -30,9 +32,14 @@ export function GeneralSettings({ mode, setMode }: { mode: ThemeMode; setMode: (
     setCustomFontSizeDraft(String(customFontSize));
   }, [customFontSize]);
 
-  // 加载当前数据目录
+  // 后端统一返回发行模式和路径，避免前端重复推断便携版目录。
   useEffect(() => {
-    getDataDirectory().then(setDataDir).catch(() => setDataDir('未知'));
+    getStorageLocationInfo()
+      .then((info) => {
+        setStorageInfo(info);
+        setDataDir(info.current_data_directory);
+      })
+      .catch(() => setDataDir('未知'));
   }, []);
 
   const handleOpenLogsFolder = async () => {
@@ -43,15 +50,33 @@ export function GeneralSettings({ mode, setMode }: { mode: ThemeMode; setMode: (
     }
   };
 
+  const handleOpenStoragePath = async (path: string, label: string) => {
+    try {
+      await openInFolder(path);
+    } catch (error) {
+      showToast({
+        type: 'error',
+        title: `打开${label}失败`,
+        description: String(error),
+      });
+    }
+  };
+
   // 更改数据目录
   const handleChangeDataDir = async () => {
     try {
       setIsChangingDir(true);
       const folder = await pickFolderDialog();
       if (!folder) { setIsChangingDir(false); return; }
-      const msg = await setDataDirectory(folder);
-      setDataDir(folder);
-      console.log(msg);
+      await setDataDirectory(folder);
+      try {
+        const info = await getStorageLocationInfo();
+        setStorageInfo(info);
+        setDataDir(info.current_data_directory);
+      } catch {
+        // 设置命令已经成功时，状态刷新失败不能误报为迁移失败。
+        setDataDir(folder);
+      }
       showToast({
         type: 'success',
         title: '数据目录已更改',
@@ -66,6 +91,28 @@ export function GeneralSettings({ mode, setMode }: { mode: ThemeMode; setMode: (
       });
     } finally {
       setIsChangingDir(false);
+    }
+  };
+
+  const handleMigrateLegacyData = async () => {
+    try {
+      setIsMigratingLegacyData(true);
+      const info = await migrateLegacyPortableData();
+      setStorageInfo(info);
+      setDataDir(info.current_data_directory);
+      showToast({
+        type: 'success',
+        title: '旧版数据迁移完成',
+        description: '原 AppData 数据未删除，便携版现在优先使用程序目录。',
+      });
+    } catch (error) {
+      showToast({
+        type: 'error',
+        title: '旧版数据迁移失败',
+        description: String(error),
+      });
+    } finally {
+      setIsMigratingLegacyData(false);
     }
   };
 
@@ -295,22 +342,67 @@ export function GeneralSettings({ mode, setMode }: { mode: ThemeMode; setMode: (
           数据管理
         </h4>
         <div className="bg-[var(--bg-main)] rounded-2xl divide-y divide-[var(--border-color)]">
-          {/* 当前数据目录 */}
-          <div className="p-4">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-xs text-[var(--text-muted)]">存储位置</span>
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] text-[var(--text-faint)] max-w-[250px] truncate" title={dataDir}>
-                  {dataDir || '加载中...'}
+          {/* 当前存储位置 */}
+          <div className="space-y-3 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <span className="shrink-0 text-xs text-[var(--text-muted)]">配置位置</span>
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="max-w-[230px] truncate text-right text-[10px] text-[var(--text-faint)]" title={storageInfo?.config_file}>
+                  {storageInfo?.config_file ? shortenPathMiddle(storageInfo.config_file) : '加载中...'}
                 </span>
                 <button
-                  onClick={() => openInFolder(dataDir).catch(console.error)}
-                  className="text-[10px] text-[var(--brand-green)] hover:opacity-80 transition shrink-0"
+                  onClick={() => storageInfo?.config_file && handleOpenStoragePath(storageInfo.config_file, '配置文件')}
+                  disabled={!storageInfo?.config_file}
+                  className="shrink-0 text-[10px] text-[var(--brand-green)] transition hover:opacity-80 disabled:opacity-40"
                 >
                   前往
                 </button>
               </div>
             </div>
+            {storageInfo?.webview_data_directory && (
+              <div className="flex items-center justify-between gap-3">
+                <span className="shrink-0 text-xs text-[var(--text-muted)]">界面数据</span>
+                <span className="max-w-[280px] truncate text-right text-[10px] text-[var(--text-faint)]" title={storageInfo.webview_data_directory}>
+                  {storageInfo.webview_data_directory}
+                </span>
+              </div>
+            )}
+            <div className="flex items-center justify-between gap-3">
+              <span className="shrink-0 text-xs text-[var(--text-muted)]">数据位置</span>
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="max-w-[230px] truncate text-[10px] text-[var(--text-faint)]" title={dataDir}>
+                  {dataDir || '加载中...'}
+                </span>
+                <button
+                  onClick={() => handleOpenStoragePath(dataDir, '数据目录')}
+                  className="shrink-0 text-[10px] text-[var(--brand-green)] transition hover:opacity-80"
+                >
+                  前往
+                </button>
+              </div>
+            </div>
+            {storageInfo && !storageInfo.can_write && (
+              <p className="flex items-start gap-1.5 text-[11px] text-[var(--color-danger)]">
+                <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                当前存储位置不可写，请将便携包解压到具有写入权限的目录。
+              </p>
+            )}
+            {storageInfo?.migration_completed && storageInfo.distribution_channel === 'portable' && (
+              <p className="flex items-center gap-1.5 text-[11px] text-[var(--brand-green)]">
+                <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                旧版 AppData 数据已兼容迁移，原数据未删除。
+              </p>
+            )}
+            {storageInfo?.migration_available && (
+              <button
+                onClick={handleMigrateLegacyData}
+                disabled={isMigratingLegacyData}
+                className="flex w-full items-center justify-center gap-2 rounded-xl border border-[var(--brand-green)] px-3 py-2 text-xs text-[var(--brand-green)] transition hover:bg-[var(--brand-green-10)] disabled:opacity-50"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${isMigratingLegacyData ? 'animate-spin' : ''}`} />
+                {isMigratingLegacyData ? '迁移中...' : '迁移旧版 AppData 数据'}
+              </button>
+            )}
           </div>
           {/* 更改数据目录 */}
           <button
@@ -328,7 +420,7 @@ export function GeneralSettings({ mode, setMode }: { mode: ThemeMode; setMode: (
               </div>
               <div className="text-left">
                 <p className="text-sm font-medium text-[var(--text-primary)]">更改数据目录</p>
-                <p className="text-xs text-[var(--text-muted)] mt-0.5">选择独立空文件夹存储清理日志和缓存数据，已有数据将自动迁移</p>
+                <p className="text-xs text-[var(--text-muted)] mt-0.5">选择独立空文件夹存储清理日志和缓存数据，配置文件不会迁移</p>
               </div>
             </div>
             <ChevronRight className="w-4 h-4 text-[var(--text-muted)] group-hover:text-[var(--text-secondary)] transition-colors" />
@@ -426,6 +518,18 @@ export function GeneralSettings({ mode, setMode }: { mode: ThemeMode; setMode: (
       </div>
     </div>
   );
+}
+
+// 中间省略可以同时保留盘符、目录层级和配置文件名，用户仍可通过 title 查看完整路径。
+function shortenPathMiddle(path: string, maxLength = 54): string {
+  if (path.length <= maxLength) {
+    return path;
+  }
+
+  const visibleLength = maxLength - 3;
+  const leftLength = Math.ceil(visibleLength * 0.45);
+  const rightLength = visibleLength - leftLength;
+  return `${path.slice(0, leftLength)}...${path.slice(-rightLength)}`;
 }
 
 function SearchEngineSettings() {

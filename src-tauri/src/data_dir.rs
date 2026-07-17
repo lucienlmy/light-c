@@ -6,8 +6,8 @@
 //   - 安装历史缓存 (install_history.json)
 //   - ProgramData 快照
 //
-// 配置固定存储在 %LOCALAPPDATA%/LightC/config/config.json，
-// 默认数据存储在 %LOCALAPPDATA%/LightC/data，避免配置和可迁移数据混在一起。
+// 安装版配置固定存储在 %LOCALAPPDATA%/LightC/config/config.json，
+// 便携版配置和默认数据跟随 exe 存储，避免便携包仍然依赖 AppData。
 // 允许用户通过 UI 自定义数据目录路径。更改时自动迁移已有数据。
 // ============================================================================
 
@@ -19,6 +19,11 @@ use std::sync::RwLock;
 
 use log;
 
+use crate::runtime::{
+    current_application_root, current_executable_path, detect_distribution_channel,
+    portable_webview_data_directory, DistributionChannel,
+};
+
 // ============================================================================
 // 常量
 // ============================================================================
@@ -29,11 +34,15 @@ const APP_ROOT_DIR_NAME: &str = "LightC";
 /// 默认数据目录子目录名，避免把 config.json 和日志/快照等运行数据放在同一层级。
 const DEFAULT_DATA_DIR_NAME: &str = "data";
 
-/// 配置目录子目录名，配置属于本机应用状态，固定留在 LocalAppData。
+/// 配置目录子目录名，安装版和便携版都保持独立的 config/data 结构。
 const CONFIG_DIR_NAME: &str = "config";
 
 /// 配置文件相对默认目录的文件名
 const CONFIG_FILE: &str = "config.json";
+
+/// 迁移状态放在数据目录中，避免把迁移元数据写进用户配置并影响旧版本读取。
+const PORTABLE_MIGRATION_DIR: &str = ".migration";
+const PORTABLE_MIGRATION_STATE_FILE: &str = "legacy_appdata_v1.json";
 
 /// 迁移数据目录时只复制 LightC 明确拥有的数据，避免用户误选磁盘根目录后把无关文件继续带到新位置。
 const MIGRATABLE_DATA_ENTRIES: [&str; 5] = [
@@ -61,6 +70,32 @@ static DATA_DIR_CACHE: std::sync::LazyLock<RwLock<PathBuf>> = std::sync::LazyLoc
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct DataDirConfig {
     data_dir: String,
+    /// 新版便携版默认目录使用相对值，程序移动后仍然能解析到当前 exe 目录。
+    #[serde(default)]
+    data_dir_mode: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct StorageLocationInfo {
+    pub distribution_channel: DistributionChannel,
+    pub config_directory: String,
+    pub config_file: String,
+    pub default_data_directory: String,
+    pub current_data_directory: String,
+    pub data_directory_is_custom: bool,
+    pub portable_root: Option<String>,
+    pub webview_data_directory: Option<String>,
+    pub legacy_data_directory: Option<String>,
+    pub can_write: bool,
+    pub migration_available: bool,
+    pub migration_completed: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PortableMigrationState {
+    schema_version: u32,
+    completed: bool,
+    source_directory: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -144,19 +179,24 @@ const CLEARABLE_DATA_DEFINITIONS: [ClearableDataDefinition; 4] = [
 // 内部函数
 // ============================================================================
 
-/// 应用本机根目录（%LOCALAPPDATA%/LightC），只作为配置和默认数据的父目录。
+/// 安装版应用本机根目录（%LOCALAPPDATA%/LightC），作为旧版数据迁移源。
 fn app_local_root_dir() -> Option<PathBuf> {
     dirs::data_local_dir().map(|dir| dir.join(APP_ROOT_DIR_NAME))
 }
 
-/// 默认数据目录路径（%LOCALAPPDATA%/LightC/data）
-fn default_data_dir() -> Option<PathBuf> {
-    app_local_root_dir().map(|dir| dir.join(DEFAULT_DATA_DIR_NAME))
+/// 当前发行包的存储根目录；便携版必须以 exe 所在目录为根。
+fn storage_root_dir() -> Option<PathBuf> {
+    current_application_root()
 }
 
-/// 配置文件存储路径（始终在独立配置目录下）
+/// 默认数据目录路径。
+fn default_data_dir() -> Option<PathBuf> {
+    storage_root_dir().map(|dir| dir.join(DEFAULT_DATA_DIR_NAME))
+}
+
+/// 配置文件存储路径；便携版配置也必须跟随 exe，移动整个目录后仍然有效。
 fn config_file_path() -> Option<PathBuf> {
-    app_local_root_dir().map(|dir| dir.join(CONFIG_DIR_NAME).join(CONFIG_FILE))
+    storage_root_dir().map(|dir| dir.join(CONFIG_DIR_NAME).join(CONFIG_FILE))
 }
 
 /// 旧版本曾把配置放在 %LOCALAPPDATA%/LightC/config.json，初始化时需要兼容读取。
@@ -167,12 +207,23 @@ fn legacy_config_file_path() -> Option<PathBuf> {
 /// 加载配置或创建默认配置
 fn load_or_create() -> PathBuf {
     let default = default_data_dir().unwrap_or_else(|| PathBuf::from("."));
+    let channel = current_distribution_channel();
 
-    // 优先读取新的独立配置目录；旧配置只作为兼容入口，成功读取后会写回新位置。
+    // 先复制旧版配置到便携目录，再解析配置中的数据目录，避免旧配置直接指向 AppData。
+    if channel == DistributionChannel::Portable {
+        migrate_legacy_portable_config_if_needed();
+    }
+
     if let Some((config, from_legacy_config)) = load_existing_config() {
-        let configured_data_dir = normalize_legacy_default_data_dir(&config.data_dir, &default);
+        let (configured_data_dir, is_legacy_default) =
+            resolve_configured_data_dir(&config, &default, channel);
+        if is_legacy_default {
+            migrate_legacy_data_to_default(&default, channel);
+        }
         if configured_data_dir.is_dir() || fs::create_dir_all(&configured_data_dir).is_ok() {
-            save_config_inner(&configured_data_dir);
+            if let Err(error) = save_config_inner(&configured_data_dir) {
+                log::warn!("保存数据目录配置失败: {}", error);
+            }
             log::info!(
                 "数据目录 ({}): {}",
                 if from_legacy_config {
@@ -190,14 +241,16 @@ fn load_or_create() -> PathBuf {
         );
     }
 
-    // 缺少配置时创建默认配置；若旧版默认目录下已有数据，只迁移 LightC 白名单数据，避免递归复制应用根目录。
-    migrate_legacy_default_data_if_needed(&default);
+    // 缺少配置时迁移旧版默认数据；只复制白名单内容，避免把用户无关文件带入便携包。
+    migrate_legacy_data_to_default(&default, channel);
     if let Err(e) = fs::create_dir_all(&default) {
         log::warn!("无法创建默认数据目录 {}: {}", default.display(), e);
     }
 
     // 首次运行时写入默认配置
-    save_config_inner(&default);
+    if let Err(error) = save_config_inner(&default) {
+        log::warn!("保存默认数据目录配置失败: {}", error);
+    }
 
     log::info!("数据目录 (默认): {}", default.display());
     default
@@ -210,6 +263,10 @@ fn load_existing_config() -> Option<(DataDirConfig, bool)> {
         }
     }
 
+    if current_distribution_channel() == DistributionChannel::Portable {
+        return None;
+    }
+
     legacy_config_file_path()
         .and_then(|config_path| read_config_file(&config_path))
         .map(|config| (config, true))
@@ -217,7 +274,7 @@ fn load_existing_config() -> Option<(DataDirConfig, bool)> {
 
 fn read_config_file(path: &Path) -> Option<DataDirConfig> {
     let json = fs::read_to_string(path).ok()?;
-    match serde_json::from_str::<DataDirConfig>(&json) {
+    match serde_json::from_str::<DataDirConfig>(json.trim_start_matches('\u{feff}')) {
         Ok(config) => Some(config),
         Err(error) => {
             // 配置损坏时不继续使用旧值，避免把异常路径写回并放大数据目录问题。
@@ -227,25 +284,51 @@ fn read_config_file(path: &Path) -> Option<DataDirConfig> {
     }
 }
 
-fn normalize_legacy_default_data_dir(
-    configured_data_dir: &str,
+/// 将旧版默认路径转换为当前发行包的默认路径。
+///
+/// 只有 AppData 根目录或 AppData/data 被视为旧版默认路径，用户主动选择的自定义路径必须保留。
+fn resolve_configured_data_dir(
+    config: &DataDirConfig,
     default_data_dir: &Path,
-) -> PathBuf {
-    let configured_path = PathBuf::from(configured_data_dir);
-    let Some(legacy_root) = app_local_root_dir() else {
-        return configured_path;
-    };
-
-    let normalized_path =
-        normalize_legacy_default_data_dir_inner(&configured_path, &legacy_root, default_data_dir);
-    if path_compare_key(&normalized_path) != path_compare_key(&configured_path) {
-        // 旧版默认数据目录就是应用根目录；新版本把真实数据迁到 data 子目录，实现配置/数据分离。
-        migrate_legacy_default_data_if_needed(default_data_dir);
+    channel: DistributionChannel,
+) -> (PathBuf, bool) {
+    if channel == DistributionChannel::Portable
+        && config.data_dir_mode.as_deref() == Some("relative")
+        && config.data_dir == DEFAULT_DATA_DIR_NAME
+    {
+        return (default_data_dir.to_path_buf(), true);
     }
 
-    normalized_path
+    let configured_path = PathBuf::from(&config.data_dir);
+    if !configured_path.is_absolute() {
+        // 外部配置可能被用户手工修改，禁止让相对路径跟随当前工作目录造成数据写入漂移。
+        log::warn!(
+            "配置中的数据目录不是绝对路径，将回退到默认目录: {}",
+            config.data_dir
+        );
+        return (default_data_dir.to_path_buf(), true);
+    }
+
+    let Some(legacy_root) = app_local_root_dir() else {
+        return (configured_path, false);
+    };
+
+    let is_legacy_default = if channel == DistributionChannel::Portable {
+        let legacy_default = legacy_root.join(DEFAULT_DATA_DIR_NAME);
+        path_compare_key(&configured_path) == path_compare_key(&legacy_root)
+            || path_compare_key(&configured_path) == path_compare_key(&legacy_default)
+    } else {
+        path_compare_key(&configured_path) == path_compare_key(&legacy_root)
+    };
+
+    if is_legacy_default {
+        (default_data_dir.to_path_buf(), true)
+    } else {
+        (configured_path, false)
+    }
 }
 
+#[cfg(test)]
 fn normalize_legacy_default_data_dir_inner(
     configured_path: &Path,
     legacy_root: &Path,
@@ -280,19 +363,156 @@ fn migrate_legacy_default_data_if_needed(default_data_dir: &Path) {
     }
 }
 
-/// 持久化配置到磁盘
-fn save_config_inner(path: &PathBuf) {
-    if let Some(cfg_path) = config_file_path() {
-        if let Some(parent) = cfg_path.parent() {
-            let _ = fs::create_dir_all(parent);
+/// 将旧版 AppData 中的白名单数据复制到当前默认目录，源文件始终保留。
+fn migrate_legacy_data_to_default(default_data_dir: &Path, channel: DistributionChannel) {
+    let Some(legacy_root) = app_local_root_dir() else {
+        return;
+    };
+
+    if channel == DistributionChannel::Portable {
+        if let Err(error) = migrate_legacy_portable_data_inner(&legacy_root, default_data_dir) {
+            log::warn!(
+                "迁移旧版便携数据失败 {} -> {}: {}",
+                legacy_root.display(),
+                default_data_dir.display(),
+                error
+            );
         }
-        let config = DataDirConfig {
-            data_dir: path.to_string_lossy().to_string(),
-        };
-        if let Ok(json) = serde_json::to_string_pretty(&config) {
-            let _ = fs::write(&cfg_path, &json);
-        }
+    } else {
+        migrate_legacy_default_data_if_needed(default_data_dir);
     }
+}
+
+/// 旧版便携程序实际把数据写在 AppData；新版本只复制明确属于 LightC 的内容。
+fn migrate_legacy_portable_data_inner(
+    legacy_root: &Path,
+    portable_data_dir: &Path,
+) -> Result<(), String> {
+    let migration_state_path = portable_data_dir
+        .join(PORTABLE_MIGRATION_DIR)
+        .join(PORTABLE_MIGRATION_STATE_FILE);
+    if read_portable_migration_state(&migration_state_path)
+        .is_some_and(|state| state.schema_version == 1 && state.completed)
+    {
+        return Ok(());
+    }
+
+    if !legacy_root.is_dir() {
+        return Ok(());
+    }
+
+    // 同时检查旧版根目录和新版 AppData/data，覆盖多个历史版本的布局。
+    let legacy_data_dir = legacy_root.join(DEFAULT_DATA_DIR_NAME);
+    migrate_owned_data_entries(legacy_root, portable_data_dir)?;
+    if legacy_data_dir.is_dir() {
+        migrate_owned_data_entries(&legacy_data_dir, portable_data_dir)?;
+    }
+
+    write_portable_migration_state(
+        &migration_state_path,
+        &PortableMigrationState {
+            schema_version: 1,
+            completed: true,
+            source_directory: legacy_root.to_string_lossy().to_string(),
+        },
+    )
+}
+
+/// 便携版没有本地配置时，先复制旧版配置，后续再把其中的默认数据路径重写为相对目录。
+fn migrate_legacy_portable_config_if_needed() {
+    let Some(target_path) = config_file_path() else {
+        return;
+    };
+    if target_path.exists() {
+        return;
+    }
+
+    let Some(legacy_root) = app_local_root_dir() else {
+        return;
+    };
+    let candidates = [
+        legacy_root.join(CONFIG_DIR_NAME).join(CONFIG_FILE),
+        legacy_root.join(CONFIG_FILE),
+    ];
+
+    for source_path in candidates {
+        if !source_path.is_file() || read_config_file(&source_path).is_none() {
+            continue;
+        }
+
+        let Some(parent) = target_path.parent() else {
+            return;
+        };
+        if let Err(error) = fs::create_dir_all(parent) {
+            log::warn!("创建便携版配置目录失败 {}: {}", parent.display(), error);
+            return;
+        }
+        if let Err(error) = fs::copy(&source_path, &target_path) {
+            log::warn!(
+                "复制旧版配置失败 {} -> {}: {}",
+                source_path.display(),
+                target_path.display(),
+                error
+            );
+        } else {
+            log::info!(
+                "已复制旧版便携配置 {} -> {}",
+                source_path.display(),
+                target_path.display()
+            );
+        }
+        return;
+    }
+}
+
+fn current_distribution_channel() -> DistributionChannel {
+    current_executable_path()
+        .map(|path| detect_distribution_channel(&path))
+        .unwrap_or(DistributionChannel::Installer)
+}
+
+fn read_portable_migration_state(path: &Path) -> Option<PortableMigrationState> {
+    let json = fs::read_to_string(path).ok()?;
+    serde_json::from_str(&json).ok()
+}
+
+fn write_portable_migration_state(
+    path: &Path,
+    state: &PortableMigrationState,
+) -> Result<(), String> {
+    let Some(parent) = path.parent() else {
+        return Err(format!("迁移状态路径无效: {}", path.display()));
+    };
+    fs::create_dir_all(parent)
+        .map_err(|error| format!("创建迁移状态目录失败 {}: {}", parent.display(), error))?;
+    let json = serde_json::to_string_pretty(state)
+        .map_err(|error| format!("序列化迁移状态失败: {}", error))?;
+    fs::write(path, json).map_err(|error| format!("写入迁移状态失败 {}: {}", path.display(), error))
+}
+
+/// 持久化配置到磁盘
+fn save_config_inner(path: &PathBuf) -> Result<(), String> {
+    let cfg_path = config_file_path().ok_or_else(|| "无法确定配置文件路径".to_string())?;
+    let parent = cfg_path
+        .parent()
+        .ok_or_else(|| format!("配置文件路径无效: {}", cfg_path.display()))?;
+    fs::create_dir_all(parent)
+        .map_err(|error| format!("创建配置目录失败 {}: {}", parent.display(), error))?;
+    let is_portable_default = current_distribution_channel() == DistributionChannel::Portable
+        && default_data_dir()
+            .is_some_and(|default| path_compare_key(&default) == path_compare_key(path));
+    let config = DataDirConfig {
+        data_dir: if is_portable_default {
+            DEFAULT_DATA_DIR_NAME.to_string()
+        } else {
+            path.to_string_lossy().to_string()
+        },
+        data_dir_mode: is_portable_default.then_some("relative".to_string()),
+    };
+    let json = serde_json::to_string_pretty(&config)
+        .map_err(|error| format!("序列化数据目录配置失败: {}", error))?;
+    fs::write(&cfg_path, json)
+        .map_err(|error| format!("写入配置文件失败 {}: {}", cfg_path.display(), error))
 }
 
 fn canonical_or_absolute(path: &Path) -> Result<PathBuf, String> {
@@ -417,6 +637,79 @@ pub fn get_default_dir() -> PathBuf {
     default_data_dir().unwrap_or_else(|| PathBuf::from("."))
 }
 
+/// 获取当前配置、默认数据和迁移状态，前端不自行推断便携版路径。
+pub fn get_storage_location_info() -> StorageLocationInfo {
+    let channel = current_distribution_channel();
+    let storage_root = storage_root_dir().unwrap_or_else(|| PathBuf::from("."));
+    let config_directory = storage_root.join(CONFIG_DIR_NAME);
+    let config_file = config_directory.join(CONFIG_FILE);
+    let default_data_directory = get_default_dir();
+    let current_data_directory = get_data_dir();
+    let legacy_root = app_local_root_dir();
+    let migration_state_path = default_data_directory
+        .join(PORTABLE_MIGRATION_DIR)
+        .join(PORTABLE_MIGRATION_STATE_FILE);
+    let migration_completed = read_portable_migration_state(&migration_state_path)
+        .is_some_and(|state| state.schema_version == 1 && state.completed);
+    let migration_available = channel == DistributionChannel::Portable
+        && !migration_completed
+        && legacy_root
+            .as_deref()
+            .is_some_and(has_migratable_data_entries);
+
+    StorageLocationInfo {
+        distribution_channel: channel,
+        config_directory: config_directory.to_string_lossy().to_string(),
+        config_file: config_file.to_string_lossy().to_string(),
+        default_data_directory: default_data_directory.to_string_lossy().to_string(),
+        current_data_directory: current_data_directory.to_string_lossy().to_string(),
+        data_directory_is_custom: path_compare_key(&default_data_directory)
+            != path_compare_key(&current_data_directory),
+        portable_root: (channel == DistributionChannel::Portable)
+            .then(|| storage_root.to_string_lossy().to_string()),
+        webview_data_directory: portable_webview_data_directory()
+            .map(|path| path.to_string_lossy().to_string()),
+        legacy_data_directory: (channel == DistributionChannel::Portable)
+            .then(|| {
+                legacy_root
+                    .as_ref()
+                    .map(|path| path.to_string_lossy().to_string())
+            })
+            .flatten(),
+        can_write: can_write_storage(&config_directory, &current_data_directory),
+        migration_available,
+        migration_completed,
+    }
+}
+
+/// 手动重试便携版旧数据迁移，供设置页处理自动迁移失败或用户稍后放入的旧数据。
+pub fn migrate_legacy_portable_data() -> Result<StorageLocationInfo, String> {
+    if current_distribution_channel() != DistributionChannel::Portable {
+        return Err("只有便携版支持迁移旧版 AppData 数据。".to_string());
+    }
+
+    let legacy_root =
+        app_local_root_dir().ok_or_else(|| "无法确定旧版 AppData 数据目录。".to_string())?;
+    let default_data_directory = get_default_dir();
+    migrate_legacy_portable_data_inner(&legacy_root, &default_data_directory)?;
+    Ok(get_storage_location_info())
+}
+
+fn has_migratable_data_entries(root: &Path) -> bool {
+    let candidate_roots = [root.to_path_buf(), root.join(DEFAULT_DATA_DIR_NAME)];
+    candidate_roots.iter().any(|candidate_root| {
+        MIGRATABLE_DATA_ENTRIES
+            .iter()
+            .map(|entry| candidate_root.join(entry))
+            .any(|path| path.exists())
+    })
+}
+
+fn can_write_storage(config_directory: &Path, data_directory: &Path) -> bool {
+    // 初始化阶段已经创建过目录，这里只确认当前运行配置仍具备写入能力，不创建测试文件污染用户目录。
+    fs::create_dir_all(config_directory).is_ok() && fs::create_dir_all(data_directory).is_ok()
+}
+
 /// 设置新的数据目录并迁移已有数据
 ///
 /// 【中文说明】
@@ -454,7 +747,7 @@ pub fn set_data_dir(new_path: &Path) -> Result<(), String> {
 
     // 更新缓存并持久化
     let path_buf = new_path.to_path_buf();
-    save_config_inner(&path_buf);
+    save_config_inner(&path_buf)?;
     *DATA_DIR_CACHE.write().unwrap() = path_buf;
 
     log::info!("数据目录已更改为: {}", new_path.display());
@@ -911,6 +1204,37 @@ mod tests {
             path_compare_key(&normalized),
             path_compare_key(&default_dir)
         );
+    }
+
+    #[test]
+    fn portable_relative_config_follows_current_default_directory() {
+        let default_dir = PathBuf::from(r"D:\LightC\data");
+        let config = DataDirConfig {
+            data_dir: DEFAULT_DATA_DIR_NAME.to_string(),
+            data_dir_mode: Some("relative".to_string()),
+        };
+
+        let (resolved, is_legacy_default) =
+            resolve_configured_data_dir(&config, &default_dir, DistributionChannel::Portable);
+
+        assert_eq!(path_compare_key(&resolved), path_compare_key(&default_dir));
+        assert!(is_legacy_default);
+    }
+
+    #[test]
+    fn portable_custom_config_remains_absolute() {
+        let default_dir = PathBuf::from(r"D:\LightC\data");
+        let custom_dir = PathBuf::from(r"E:\LightCData");
+        let config = DataDirConfig {
+            data_dir: custom_dir.to_string_lossy().to_string(),
+            data_dir_mode: None,
+        };
+
+        let (resolved, is_legacy_default) =
+            resolve_configured_data_dir(&config, &default_dir, DistributionChannel::Portable);
+
+        assert_eq!(path_compare_key(&resolved), path_compare_key(&custom_dir));
+        assert!(!is_legacy_default);
     }
 
     #[test]

@@ -32,12 +32,34 @@ export interface VerifyIntegrityResult {
   official_url: string;
 }
 
-/**
- * 获取当前发行渠道。
- * 便携版由 exe 同目录的 LightC.portable 标记文件识别，前端据此禁用自动更新安装流程。
- */
+/** 获取当前发行渠道；后端兼容旧 marker 和新版 manifest。 */
 export async function getDistributionChannel(): Promise<DistributionChannel> {
   return invoke<DistributionChannel>('get_distribution_channel');
+}
+
+export interface StorageLocationInfo {
+  distribution_channel: DistributionChannel;
+  config_directory: string;
+  config_file: string;
+  default_data_directory: string;
+  current_data_directory: string;
+  data_directory_is_custom: boolean;
+  portable_root?: string | null;
+  webview_data_directory?: string | null;
+  legacy_data_directory?: string | null;
+  can_write: boolean;
+  migration_available: boolean;
+  migration_completed: boolean;
+}
+
+/** 获取统一的配置、数据目录和便携版迁移状态。 */
+export async function getStorageLocationInfo(): Promise<StorageLocationInfo> {
+  return invoke<StorageLocationInfo>('get_storage_location_info');
+}
+
+/** 重试旧版便携数据迁移，后端只复制 LightC 自有数据且保留源文件。 */
+export async function migrateLegacyPortableData(): Promise<StorageLocationInfo> {
+  return invoke<StorageLocationInfo>('migrate_legacy_portable_data');
 }
 
 /**

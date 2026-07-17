@@ -10,6 +10,18 @@ pub fn get_data_directory() -> Result<String, String> {
         .to_string())
 }
 
+/// 获取统一的发行模式、配置路径、数据路径和便携迁移状态。
+#[tauri::command]
+pub fn get_storage_location_info() -> crate::data_dir::StorageLocationInfo {
+    crate::data_dir::get_storage_location_info()
+}
+
+/// 重试便携版旧 AppData 数据迁移，源数据始终保留。
+#[tauri::command]
+pub fn migrate_legacy_portable_data() -> Result<crate::data_dir::StorageLocationInfo, String> {
+    crate::data_dir::migrate_legacy_portable_data()
+}
+
 /// 设置数据目录并迁移数据
 #[tauri::command]
 pub fn set_data_directory(path: String) -> Result<String, String> {

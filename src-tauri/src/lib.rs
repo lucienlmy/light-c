@@ -13,6 +13,7 @@ mod disk_health;
 mod driver_cleanup;
 mod health_score;
 mod logger;
+mod runtime;
 mod scanner;
 mod system_info;
 mod system_slim;
@@ -48,11 +49,32 @@ pub fn run() {
     // 初始化日志
     env_logger::init();
 
+    // 便携版必须在 Tauri 自动创建窗口前指定 WebView2 绝对数据目录，
+    // 否则 localStorage 会继续落到 AppData，便携包移动后设置不会跟随。
+    let portable_webview_data_directory = runtime::prepare_portable_webview_data_directory();
+    let mut context = tauri::generate_context!();
+    if portable_webview_data_directory.is_some() {
+        for window_config in &mut context.config_mut().app.windows {
+            window_config.create = false;
+        }
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .setup(move |app| {
+            if let Some(webview_data_directory) = portable_webview_data_directory.clone() {
+                let window_configs = app.config().app.windows.clone();
+                for window_config in window_configs {
+                    tauri::WebviewWindowBuilder::from_config(app.handle(), &window_config)?
+                        .data_directory(webview_data_directory.join(&window_config.label))
+                        .build()?;
+                }
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             // 启动屏幕
             close_splashscreen,
@@ -129,6 +151,8 @@ pub fn run() {
             get_disk_growth_directory_details,
             // 数据目录管理
             get_data_directory,
+            get_storage_location_info,
+            migrate_legacy_portable_data,
             set_data_directory,
             clear_local_data,
             list_clearable_data_items,
@@ -138,6 +162,6 @@ pub fn run() {
             scan_ai_model_assets,
             delete_ai_model,
         ])
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("启动应用程序时发生错误");
 }

@@ -2,12 +2,11 @@
 // 文件完整性校验命令
 // ============================================================================
 
+use crate::runtime::{detect_distribution_channel, DistributionChannel};
 use base64::Engine;
 use minisign_verify::{PublicKey, Signature};
 use serde::Serialize;
-use std::path::{Path, PathBuf};
-
-const PORTABLE_MARKER_FILE: &str = "LightC.portable";
+use std::path::PathBuf;
 const INSTALLER_EXE_SIGNATURE_ASSET: &str = "LightC_installer_exe.sig";
 const WEBVIEW2_OFFLINE_EXE_SIGNATURE_ASSET: &str = "LightC_webview2_offline_exe.sig";
 const PORTABLE_EXE_SIGNATURE_ASSET: &str = "LightC_portable_exe.sig";
@@ -264,19 +263,6 @@ fn decode_base64_text(base64_text: &str) -> Result<String, String> {
     String::from_utf8(bytes).map_err(|error| error.to_string())
 }
 
-fn detect_distribution_channel(exe_path: &Path) -> DistributionChannel {
-    let marker_exists = exe_path
-        .parent()
-        .map(|parent| parent.join(PORTABLE_MARKER_FILE))
-        .is_some_and(|marker_path| marker_path.is_file());
-
-    if marker_exists {
-        DistributionChannel::Portable
-    } else {
-        DistributionChannel::Installer
-    }
-}
-
 fn current_channel_label() -> String {
     std::env::current_exe()
         .ok()
@@ -302,20 +288,6 @@ fn build_result(
         channel,
         message,
         official_url: OFFICIAL_RELEASE_URL.to_string(),
-    }
-}
-
-enum DistributionChannel {
-    Installer,
-    Portable,
-}
-
-impl DistributionChannel {
-    fn label(&self) -> &'static str {
-        match self {
-            DistributionChannel::Installer => "安装版",
-            DistributionChannel::Portable => "便携版",
-        }
     }
 }
 

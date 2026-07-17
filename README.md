@@ -70,6 +70,7 @@
 ### 🧩 旧驱动清理（需管理员权限）
 - **官方工具检测**：通过 Windows `pnputil` 的结构化 XML 输出读取第三方驱动包，不直接扫描或删除 `DriverStore`、`.sys` 文件
 - **系统版本兼容**：旧版 Windows 不支持 `pnputil` XML 参数时自动回退到文本输出，不会因格式参数缺失而无法检测驱动包
+- **Windows 10 文本兼容**：旧驱动清理兼容中文系统字段、字段冒号空格和无 BOM UTF-16 输出，适配 Windows 10 22H2 等环境
 - **保守删除边界**：全量检测第三方驱动包，并单独统计可处理候选；正在使用的驱动包绝对不可选，未关联设备但无法证明已被替代的条目只允许用户确认后处理，驱动类别提供中文对照
 - **失败可定位**：删除失败会在结果提示中展示 `pnputil` 返回原因；重复尝试会复用已有驱动备份，不重复导出同一驱动包
 - **辅助确认**：每个驱动条目支持搜索驱动信息和打开 Driver Store 所在目录，搜索关键词会自动去除日期等噪声
@@ -157,7 +158,9 @@
 
 ### ⚙️ 设置与本地数据
 - **使用说明收敛**：设置页使用说明补充“磁盘信息”和“AI 模型空间”，并压缩大目录分析、磁盘变化分析说明，保留核心使用边界
-- **配置与数据分离**：应用配置固定保存在 `%LOCALAPPDATA%/LightC/config/config.json`，默认运行数据保存在 `%LOCALAPPDATA%/LightC/data/`；更改数据目录只迁移日志、备份、快照和安装历史缓存，不把配置文件混入用户选择的数据目录
+- **配置与数据分离**：安装版配置固定保存在 `%LOCALAPPDATA%/LightC/config/config.json`，默认运行数据保存在 `%LOCALAPPDATA%/LightC/data/`；便携版默认将 `config/` 和 `data/` 保存在 `LightC.exe` 同目录，移动整个便携目录后数据仍然跟随移动
+- **便携版旧数据兼容**：新版便携版优先读取程序目录数据；检测到旧版本写入 `%LOCALAPPDATA%/LightC` 的配置、日志、备份、快照和安装历史，以及 `%LOCALAPPDATA%/com.chunyu.LightC` 的 WebView2 设置时，只复制到便携目录，原 AppData 数据不会删除
+- **配置文件定位**：设置 → 通用 → 数据管理中显示配置文件位置，长路径采用中间省略，并可直接在资源管理器中定位配置文件
 - **数据目录迁移保护**：更改数据目录时必须选择独立空文件夹，禁止选择当前数据目录、父目录或子目录；迁移只复制 LightC 明确拥有的日志、备份、快照和安装历史缓存，避免误选磁盘根目录后把无关文件继续迁移
 - **可选本地数据清理**：清空本地数据前会列出安装历史缓存、清理日志、注册表备份、按盘符拆分的磁盘变化分析快照等白名单项，显示路径、文件数、大小和影响说明；用户可按项勾选清理，应用配置不会被删除
 - **日志保留数量**：通用设置可自定义清理日志最多保留 1-100 条，超过上限后继续按最旧日志优先覆盖
@@ -384,7 +387,7 @@ LightC/
 │   │   └── main.rs                   # 应用主入口
 │   ├── capabilities/
 │   │   └── default.json              # 权限配置
-│   ├── icons/                        # 应用图标
+│   ├── icons/                        # 应用图标（含 Windows 48x48 资源）
 │   ├── tauri.conf.json               # Tauri 配置
 │   └── Cargo.toml                    # Rust 依赖
 │
@@ -475,7 +478,7 @@ npm run tauri build
    - `LightC_x.x.x_x64-setup.nsis.zip.sig`
    - `latest.json`（构建时自动生成）
    - `LightC_webview2_offline_x64.exe`（内置 WebView2 离线安装器，适合 WebView2 环境异常或安装时网络受限的用户）
-   - `LightC_portable_x64.zip`（便携包内包含 `LightC.portable` 标记文件，用于禁用安装器式自动更新）
+   - `LightC_portable_x64.zip`（便携包内包含 `LightC.portable` 旧标记和 `LightC.portable.json` manifest；默认数据保存在程序目录）
    - `LightC_installer_exe.sig`（安装版用于校验当前 `LightC.exe` 的官方签名，格式与 updater 的 base64 签名字符串一致）
    - `LightC_webview2_offline_exe.sig`（WebView2 离线安装版用于校验当前 `LightC.exe` 的官方签名）
    - `LightC_portable_exe.sig`（便携版解压后用于校验当前 `LightC.exe` 的官方签名，格式与 updater 的 base64 签名字符串一致）
@@ -487,7 +490,8 @@ npm run tauri build
 - 安装版保留 Tauri 自动更新，继续使用 `latest.json` 和签名包完成更新；自动更新或覆盖安装前会尝试关闭残留的 `LightC.exe`，降低目标 exe 被占用导致安装失败的概率。
 - WebView2 异常或安装时网络受限的用户可改用 `LightC_webview2_offline_x64.exe`。
 - 完整性校验不复用更新包签名，而是读取当前版本 Release 中的 exe 专用签名资产，避免把 zip/updater 包签名误用于运行中 exe。
-- 便携版由发布流程写入 `LightC.portable` 标记文件，运行时识别后不会自动弹出更新安装器。
+- 便携版由发布流程写入 `LightC.portable.json` manifest，并保留 `LightC.portable` 旧标记；运行时识别后不会自动弹出更新安装器。旧版本便携包仍可被新版识别。
+- 便携版完整性校验读取 `LightC_portable_exe.sig`，校验对象是便携包内最终的 `LightC.exe`；安装版和 WebView2 离线版分别使用各自的 exe `.sig` 文件，不能混用。
 - 便携版“检查更新”入口会优先读取 Release 的 `download.json` 并打开作者网盘下载页，用户下载新版 zip 后覆盖当前目录即可；读取失败时降级到 GitHub Releases。
 
 ---

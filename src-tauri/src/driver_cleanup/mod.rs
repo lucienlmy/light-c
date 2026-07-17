@@ -877,6 +877,7 @@ fn assign_driver_text(package: &mut RawDriverPackage, element: &str, text: &str)
 fn parse_driver_text(text: &str) -> Vec<RawDriverPackage> {
     let mut packages = Vec::new();
     let mut current: Option<RawDriverPackage> = None;
+    let mut reading_driver_files = false;
 
     for line in text.lines() {
         let trimmed = line.trim();
@@ -884,40 +885,45 @@ fn parse_driver_text(text: &str) -> Vec<RawDriverPackage> {
             continue;
         }
 
-        if let Some(value) = text_field_value(trimmed, "Published Name:") {
-            if let Some(package) = current.take() {
-                packages.push(package);
+        if let Some((field, value)) = parse_text_field(trimmed) {
+            if field == TextDriverField::PublishedName {
+                if let Some(package) = current.take() {
+                    packages.push(package);
+                }
+                reading_driver_files = false;
+                current = Some(RawDriverPackage {
+                    published_name: value,
+                    ..RawDriverPackage::default()
+                });
+                continue;
             }
-            current = Some(RawDriverPackage {
-                published_name: value,
-                ..RawDriverPackage::default()
-            });
+
+            let Some(package) = current.as_mut() else {
+                continue;
+            };
+            reading_driver_files = field == TextDriverField::DriverFiles;
+            match field {
+                TextDriverField::OriginalName => package.original_name = value,
+                TextDriverField::ProviderName => package.provider_name = value,
+                TextDriverField::ClassName => package.class_name = value,
+                TextDriverField::DriverVersion => package.driver_version = value,
+                TextDriverField::SignerName => package.signer_name = value,
+                TextDriverField::DriverPackageId => package.driver_package_id = value,
+                TextDriverField::FamilyId => package.family_id = value,
+                TextDriverField::DriverFiles => package.file_count = 0,
+                TextDriverField::PublishedName => unreachable!(),
+            }
             continue;
         }
 
         let Some(package) = current.as_mut() else {
             continue;
         };
-        if let Some(value) = text_field_value(trimmed, "Original Name:") {
-            package.original_name = value;
-        } else if let Some(value) = text_field_value(trimmed, "Provider Name:") {
-            package.provider_name = value;
-        } else if let Some(value) = text_field_value(trimmed, "Class Name:") {
-            package.class_name = value;
-        } else if let Some(value) = text_field_value(trimmed, "Driver Version:") {
-            package.driver_version = value;
-        } else if let Some(value) = text_field_value(trimmed, "Signer Name:") {
-            package.signer_name = value;
-        } else if let Some(value) = text_field_value(trimmed, "Driver Package ID:") {
-            package.driver_package_id = value;
-        } else if let Some(value) = text_field_value(trimmed, "Family ID:") {
-            package.family_id = value;
-        } else if trimmed.starts_with("Driver Files:") {
-            package.file_count = 0;
-        } else if !line.starts_with(' ') && !line.starts_with('\t') {
+        if !line.starts_with(' ') && !line.starts_with('\t') {
             // 保留边界判断，避免把下一段非包标题文本误当作驱动文件。
             continue;
-        } else if package.file_count > 0 || !trimmed.contains(':') {
+        } else if reading_driver_files {
+            // 驱动文件路径本身可能包含盘符冒号，不能用“是否含冒号”排除它。
             package.file_count = package.file_count.saturating_add(1);
         }
     }
@@ -928,11 +934,69 @@ fn parse_driver_text(text: &str) -> Vec<RawDriverPackage> {
     packages
 }
 
-fn text_field_value(line: &str, field: &str) -> Option<String> {
-    line.strip_prefix(field)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToString::to_string)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TextDriverField {
+    PublishedName,
+    OriginalName,
+    ProviderName,
+    ClassName,
+    DriverVersion,
+    SignerName,
+    DriverPackageId,
+    FamilyId,
+    DriverFiles,
+}
+
+/// 解析 pnputil 文本字段，兼容英文/中文系统以及字段名和冒号之间的空格。
+fn parse_text_field(line: &str) -> Option<(TextDriverField, String)> {
+    let (raw_name, raw_value) = line.split_once(':')?;
+    let field = match normalize_text_field_name(raw_name) {
+        name if matches_any(&name, &["publishedname", "发布名称", "发布的名称"]) => {
+            TextDriverField::PublishedName
+        }
+        name if matches_any(&name, &["originalname", "原始名称"]) => {
+            TextDriverField::OriginalName
+        }
+        name if matches_any(&name, &["providername", "提供程序名称", "提供商名称"]) => {
+            TextDriverField::ProviderName
+        }
+        name if matches_any(&name, &["classname", "类名"]) => TextDriverField::ClassName,
+        name if matches_any(&name, &["driverversion", "驱动程序版本", "驱动版本"]) => {
+            TextDriverField::DriverVersion
+        }
+        name if matches_any(&name, &["signername", "签名者名称", "签名名称"]) => {
+            TextDriverField::SignerName
+        }
+        name if matches_any(&name, &["driverpackageid", "驱动程序包id", "驱动包id"]) => {
+            TextDriverField::DriverPackageId
+        }
+        name if matches_any(&name, &["familyid", "系列id", "驱动系列id"]) => {
+            TextDriverField::FamilyId
+        }
+        name if matches_any(&name, &["driverfiles", "驱动程序文件", "驱动文件"]) => {
+            TextDriverField::DriverFiles
+        }
+        // 未知字段不返回结果，避免把 C:\\Windows\\System32\\xxx.sys 误判成字段。
+        _ => return None,
+    };
+
+    let value = raw_value.trim();
+    if value.is_empty() && field != TextDriverField::DriverFiles {
+        None
+    } else {
+        Some((field, value.to_string()))
+    }
+}
+
+fn normalize_text_field_name(name: &str) -> String {
+    name.chars()
+        .filter(|character| !character.is_whitespace() && *character != '_')
+        .collect::<String>()
+        .to_ascii_lowercase()
+}
+
+fn matches_any(value: &str, candidates: &[&str]) -> bool {
+    candidates.iter().any(|candidate| value == *candidate)
 }
 
 fn build_driver_store_path(driver_package_id: &str) -> String {
@@ -1091,6 +1155,11 @@ fn decode_windows_output(raw: &[u8]) -> String {
                 .collect::<Vec<_>>(),
         );
     }
+    // 某些 Windows 10 构建在重定向输出时不带 BOM，先按空字节分布识别 UTF-16，
+    // 否则它可能被误当成“可解析的 UTF-8”，最终文本会带大量 NUL 导致字段匹配失败。
+    if let Some(text) = decode_unmarked_utf16(raw) {
+        return text;
+    }
     if let Ok(text) = std::str::from_utf8(raw) {
         return text.to_string();
     }
@@ -1134,6 +1203,36 @@ fn decode_windows_output(raw: &[u8]) -> String {
         }
     }
     String::from_utf8_lossy(raw).into_owned()
+}
+
+#[cfg(target_os = "windows")]
+fn decode_unmarked_utf16(raw: &[u8]) -> Option<String> {
+    if raw.len() < 4 || raw.len() % 2 != 0 {
+        return None;
+    }
+
+    let even_zero_count = raw.chunks_exact(2).filter(|chunk| chunk[0] == 0).count();
+    let odd_zero_count = raw.chunks_exact(2).filter(|chunk| chunk[1] == 0).count();
+    let pair_count = raw.len() / 2;
+    let threshold = pair_count / 4;
+
+    if odd_zero_count > even_zero_count && odd_zero_count >= threshold {
+        let code_units = raw
+            .chunks_exact(2)
+            .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+            .collect::<Vec<_>>();
+        return Some(String::from_utf16_lossy(&code_units));
+    }
+
+    if even_zero_count > odd_zero_count && even_zero_count >= threshold {
+        let code_units = raw
+            .chunks_exact(2)
+            .map(|chunk| u16::from_be_bytes([chunk[0], chunk[1]]))
+            .collect::<Vec<_>>();
+        return Some(String::from_utf16_lossy(&code_units));
+    }
+
+    None
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -1225,6 +1324,48 @@ Driver Files:
         assert_eq!(packages[0].original_name, "example.inf");
         assert_eq!(packages[0].provider_name, "Example Provider");
         assert_eq!(packages[0].file_count, 1);
+    }
+
+    #[test]
+    fn parses_localized_pnputil_text_with_spaced_colons() {
+        use super::{parse_text_field, TextDriverField};
+
+        assert_eq!(
+            parse_text_field("发布名称 : oem42.inf"),
+            Some((TextDriverField::PublishedName, "oem42.inf".to_string()))
+        );
+        let text = r#"Microsoft PnP Utility
+发布名称 : oem42.inf
+原始名称 : example.inf
+提供程序名称 : Example Provider
+类名 : System
+驱动程序版本 : 02/08/2024 1.2.3.4
+签名者名称 : Microsoft Windows Hardware Compatibility Publisher
+驱动程序文件 :
+    C:\\Windows\\System32\\drivers\\example.sys
+"#;
+
+        let packages = parse_driver_text(text);
+        assert_eq!(packages.len(), 1);
+        assert_eq!(packages[0].published_name, "oem42.inf");
+        assert_eq!(packages[0].original_name, "example.inf");
+        assert_eq!(packages[0].provider_name, "Example Provider");
+        assert_eq!(packages[0].file_count, 1);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn decodes_unmarked_utf16_pnputil_output() {
+        use super::decode_windows_output;
+
+        let raw = "Published Name:     oem42.inf\r\n"
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            decode_windows_output(&raw),
+            "Published Name:     oem42.inf\r\n"
+        );
     }
 
     #[test]
