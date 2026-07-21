@@ -36,6 +36,7 @@ import {
   type EnhancedDeleteResult,
 } from '../../api/commands';
 import { formatSize } from '../../utils/format';
+import { openSearchUrl } from '../../utils/searchEngine';
 import type {
   CategoryScanResult,
   DeepJunkScanProgress,
@@ -502,6 +503,19 @@ export function JunkCleanModule({ layoutMode = 'cards', isPageActive = true }: M
     }
   }, [deepScanResult, excludedDeepPaths, fullySelectedDeepCategoryNames, refreshScanResultAfterDelete, scanMode, selectedFileCount, selectedPaths, selectedCategoryNames, showToast]);
 
+  // 垃圾文件默认使用完整路径搜索，回收站条目则搜索原始路径，避免把内部 $R 文件名交给搜索引擎。
+  const handleSearchFile = useCallback(async (file: FileInfo) => {
+    const searchPath = file.category === 'RecycleBin'
+      ? file.original_path || file.name
+      : file.path;
+    try {
+      await openSearchUrl(`Windows 文件 ${searchPath} 可以删除吗`);
+    } catch (error) {
+      console.error('搜索文件用途失败:', error);
+      showToast({ type: 'error', title: '打开搜索失败', description: String(error) });
+    }
+  }, [showToast]);
+
   // 切换文件选中状态
   const toggleFileSelection = useCallback((path: string) => {
     // 后台核验会重建分类统计，期间冻结选择状态，避免用户操作被异步刷新覆盖。
@@ -855,6 +869,7 @@ export function JunkCleanModule({ layoutMode = 'cards', isPageActive = true }: M
                     selectedPaths={selectedPaths}
                     onToggleFile={toggleFileSelection}
                     onToggleCategory={toggleCategorySelection}
+                    onSearchFile={handleSearchFile}
                     hasMore={scanMode === 'deep' && category.has_more === true}
                     onLoadMore={() => handleLoadMoreDeepCategory(category.display_name)}
                     isLoadingMore={loadingDeepCategory === category.display_name}

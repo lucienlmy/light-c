@@ -13,8 +13,10 @@ import {
   AlertTriangle,
   FolderOpen,
   ExternalLink,
+  Search,
 } from 'lucide-react';
 import { openInFolder, openFile, openRecycleBin } from '../api/commands';
+import { stripWindowsDevicePrefix } from '../utils/searchEngine';
 import type { CategoryScanResult, FileInfo } from '../types';
 import { formatSize } from '../utils/format';
 
@@ -49,6 +51,7 @@ interface CategoryCardProps {
   selectedPaths: Set<string>;
   onToggleFile: (path: string) => void;
   onToggleCategory: (categoryName: string, files: FileInfo[], selected: boolean) => void;
+  onSearchFile: (file: FileInfo) => void;
   hasMore?: boolean;
   onLoadMore?: () => void;
   isLoadingMore?: boolean;
@@ -62,6 +65,7 @@ export function CategoryCard({
   selectedPaths,
   onToggleFile,
   onToggleCategory,
+  onSearchFile,
   hasMore = false,
   onLoadMore,
   isLoadingMore = false,
@@ -193,11 +197,12 @@ export function CategoryCard({
                   const file = category.files[virtualRow.index];
                   const isSelected = selectedPaths.has(file.path);
                   return (
-                    <VirtualFileItem
-                      key={file.path}
-                      file={file}
-                      selected={isSelected}
-                      onToggle={() => onToggleFile(file.path)}
+                      <VirtualFileItem
+                        key={file.path}
+                        file={file}
+                        selected={isSelected}
+                        onToggle={() => onToggleFile(file.path)}
+                        onSearch={() => onSearchFile(file)}
                       style={{
                         position: 'absolute',
                         top: 0,
@@ -236,14 +241,17 @@ interface VirtualFileItemProps {
   file: FileInfo;
   selected: boolean;
   onToggle: () => void;
+  onSearch: () => void;
   style: React.CSSProperties;
 }
 
-const VirtualFileItem = memo(function VirtualFileItem({ file, selected, onToggle, style }: VirtualFileItemProps) {
+const VirtualFileItem = memo(function VirtualFileItem({ file, selected, onToggle, onSearch, style }: VirtualFileItemProps) {
   // 回收站的真实删除路径是隐藏的 $R 文件，界面展示元数据中的原始文件名，避免与 Explorer 看到的内容脱节。
-  const displayPath = file.category === 'RecycleBin' ? file.name : file.path;
+  const displayPath = file.category === 'RecycleBin'
+    ? file.name
+    : stripWindowsDevicePrefix(file.path);
   const displayTitle = file.category === 'RecycleBin' && file.original_path
-    ? `原位置：${file.original_path}`
+    ? `原位置：${stripWindowsDevicePrefix(file.original_path)}`
     : displayPath;
 
   return (
@@ -282,6 +290,16 @@ const VirtualFileItem = memo(function VirtualFileItem({ file, selected, onToggle
 
       {/* 操作按钮 */}
       <div className="flex items-center gap-1 shrink-0">
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onSearch();
+          }}
+          className="p-1.5 hover:bg-[var(--bg-active)] rounded-lg transition text-[var(--text-muted)] hover:text-[var(--brand-green)]"
+          title="搜索该文件能不能删"
+        >
+          <Search className="w-4 h-4" />
+        </button>
         <button
           onClick={(e) => {
             e.stopPropagation();
