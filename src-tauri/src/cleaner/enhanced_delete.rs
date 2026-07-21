@@ -20,6 +20,7 @@ use std::os::windows::process::CommandExt;
 use std::path::Path;
 use std::process::Command;
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
@@ -319,6 +320,34 @@ pub struct EnhancedDeleteResult {
     pub summary_message: String,
 }
 
+/// 增强删除过程的批量进度。
+///
+/// 进度只汇总当前批次的统计，不携带文件明细，避免大批量删除时频繁向 WebView 传输大对象。
+#[derive(Debug, Clone, Serialize)]
+pub struct EnhancedDeleteProgress {
+    /// 当前阶段，删除引擎目前使用 cleaning。
+    pub phase: String,
+    /// 已处理的文件数量。
+    pub processed_count: usize,
+    /// 本次删除的去重后文件总数。
+    pub total_count: usize,
+    /// 已成功删除的文件数量。
+    pub success_count: usize,
+    /// 已失败的文件数量。
+    pub failed_count: usize,
+    /// 已标记重启删除的文件数量。
+    pub reboot_pending_count: usize,
+    /// 当前已经确认释放的物理空间。
+    pub freed_physical_size: u64,
+    /// 删除引擎启动后的耗时。
+    pub elapsed_ms: u64,
+}
+
+/// 进度事件的最大发送间隔，保证单个批次处理较慢时界面仍能持续反馈。
+const DELETE_PROGRESS_INTERVAL: Duration = Duration::from_millis(500);
+/// 常规批量进度间隔，避免每个文件发送 IPC 事件造成额外开销。
+const DELETE_PROGRESS_BATCH_SIZE: usize = 500;
+
 impl EnhancedDeleteResult {
     pub fn new() -> Self {
         Self {
@@ -484,7 +513,60 @@ impl EnhancedDeleteEngine {
 
     /// 删除文件列表
     pub fn delete_files(&self, paths: &[String]) -> EnhancedDeleteResult {
+        // 保留原有公开接口，其他模块无需感知进度事件即可继续复用删除引擎。
+        self.delete_files_with_progress(paths, |_| {})
+    }
+
+    /// 删除文件列表并按批次回调进度。
+    ///
+    /// 回调在删除线程内执行，调用方只能做轻量级通知，不能在其中执行文件 IO。
+    pub fn delete_files_with_progress<F>(
+        &self,
+        paths: &[String],
+        mut on_progress: F,
+    ) -> EnhancedDeleteResult
+    where
+        F: FnMut(EnhancedDeleteProgress),
+    {
         let mut result = EnhancedDeleteResult::new();
+        let total_count = paths.len();
+        let started_at = Instant::now();
+        let mut processed_count = 0usize;
+        let mut last_progress_at = Instant::now();
+
+        // 删除任务刚进入执行线程时先推送一次清理阶段，避免少量文件任务看起来没有进度。
+        on_progress(EnhancedDeleteProgress {
+            phase: "cleaning".to_string(),
+            processed_count: 0,
+            total_count,
+            success_count: 0,
+            failed_count: 0,
+            reboot_pending_count: 0,
+            freed_physical_size: 0,
+            elapsed_ms: 0,
+        });
+
+        // 进度事件只传递聚合数据，避免大批量文件删除时拖慢实际清理速度。
+        let mut emit_progress = |processed: usize, current_result: &EnhancedDeleteResult| {
+            let should_emit = processed == total_count
+                || processed.saturating_sub(1) % DELETE_PROGRESS_BATCH_SIZE == 0
+                || last_progress_at.elapsed() >= DELETE_PROGRESS_INTERVAL;
+            if !should_emit {
+                return;
+            }
+
+            on_progress(EnhancedDeleteProgress {
+                phase: "cleaning".to_string(),
+                processed_count: processed,
+                total_count,
+                success_count: current_result.success_count,
+                failed_count: current_result.failed_count,
+                reboot_pending_count: current_result.reboot_pending_count,
+                freed_physical_size: current_result.freed_physical_size,
+                elapsed_ms: started_at.elapsed().as_millis() as u64,
+            });
+            last_progress_at = Instant::now();
+        };
 
         info!("增强删除引擎：开始删除 {} 个文件", paths.len());
 
@@ -519,6 +601,9 @@ impl EnhancedDeleteEngine {
                         )),
                         marked_for_reboot: false,
                     });
+                    // 非法回收站路径也算作已处理，保证进度总数在异常输入下仍能收敛到 100%。
+                    processed_count += 1;
+                    emit_progress(processed_count, &result);
                     continue;
                 };
                 // 回收站支持多盘，物理大小必须使用条目所在卷的簇大小而不是固定 C 盘值。
@@ -532,6 +617,8 @@ impl EnhancedDeleteEngine {
             }
 
             for (drive_root, entries) in recycle_by_drive {
+                // 先保存数量，因为后续分支会消费 entries 中的完整条目结果。
+                let processed_in_drive = entries.len();
                 match windows_api::empty_recycle_bin(Some(&drive_root)) {
                     Ok(_) => {
                         info!("Shell API 清空回收站成功: {}", drive_root);
@@ -568,6 +655,9 @@ impl EnhancedDeleteEngine {
                         }
                     }
                 }
+                // Shell API 按卷执行，完成一个卷后统一推进进度，避免对每个回收站元数据重复发事件。
+                processed_count += processed_in_drive;
+                emit_progress(processed_count, &result);
             }
         }
 
@@ -592,6 +682,8 @@ impl EnhancedDeleteEngine {
             }
 
             result.file_results.push(file_result);
+            processed_count += 1;
+            emit_progress(processed_count, &result);
         }
 
         result.generate_summary();

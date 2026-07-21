@@ -99,6 +99,26 @@ export interface DeepJunkScanProgress {
   elapsed_ms: number;
 }
 
+/** 垃圾清理删除阶段的批量进度事件。 */
+export interface EnhancedDeleteProgress {
+  /** 当前阶段：准备中或清理中。核验由前端在命令完成后单独展示。 */
+  phase: 'preparing' | 'cleaning';
+  /** 已处理的文件数量。 */
+  processed_count: number;
+  /** 去重后的待处理文件总数。 */
+  total_count: number;
+  /** 已成功删除的文件数量。 */
+  success_count: number;
+  /** 已失败的文件数量。 */
+  failed_count: number;
+  /** 已标记为重启删除的文件数量。 */
+  reboot_pending_count: number;
+  /** 已确认释放的物理空间。 */
+  freed_physical_size: number;
+  /** 后端删除耗时（毫秒）。 */
+  elapsed_ms: number;
+}
+
 /** 删除结果 */
 export interface DeleteResult {
   /** 成功删除的文件数 */

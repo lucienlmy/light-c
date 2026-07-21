@@ -48,7 +48,7 @@ interface CategoryCardProps {
   category: CategoryScanResult;
   selectedPaths: Set<string>;
   onToggleFile: (path: string) => void;
-  onToggleCategory: (files: FileInfo[], selected: boolean) => void;
+  onToggleCategory: (categoryName: string, files: FileInfo[], selected: boolean) => void;
   hasMore?: boolean;
   onLoadMore?: () => void;
   isLoadingMore?: boolean;
@@ -96,8 +96,8 @@ export function CategoryCard({
   });
 
   const handleCategoryToggle = useCallback(() => {
-    onToggleCategory(category.files, !isAllSelected);
-  }, [category.files, isAllSelected, onToggleCategory]);
+    onToggleCategory(category.display_name, category.files, !isAllSelected);
+  }, [category.display_name, category.files, isAllSelected, onToggleCategory]);
 
   const handleExpand = useCallback(() => {
     setExpanded(prev => !prev);
@@ -157,7 +157,10 @@ export function CategoryCard({
               {category.file_count.toLocaleString()} 个文件
               {selectedCount > 0 && (
                 <span className="text-[var(--brand-green)] ml-1">
-                  (已选 {selectedCount.toLocaleString()} 个, {formatSize(selectedSize)})
+                  {/* 深度分类分页时提示完整删除口径，避免把当前页大小误认为分类总量。 */}
+                  {hasMore && selectedCount === category.files.length
+                    ? `(已选当前页 ${selectedCount.toLocaleString()} 个，清理时包含完整分类)`
+                    : `(已选 ${selectedCount.toLocaleString()} 个, ${formatSize(selectedSize)})`}
                 </span>
               )}
             </p>

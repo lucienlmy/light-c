@@ -272,6 +272,50 @@ pub fn get_category_page(
     page_category(category, offset, limit.clamp(1, DEEP_JUNK_PAGE_SIZE * 2))
 }
 
+/// 从短期扫描会话中取出完整分类路径，供删除命令处理分页未返回的文件。
+pub fn get_paths_for_categories(
+    scan_id: &str,
+    category_names: &[String],
+    excluded_paths: &[String],
+) -> Result<Vec<String>, String> {
+    let sessions = DEEP_JUNK_SESSIONS
+        .lock()
+        .map_err(|_| "深度扫描会话锁异常，请重试".to_string())?;
+    let session = sessions
+        .get(scan_id)
+        .ok_or_else(|| "深度扫描结果已过期，请重新扫描".to_string())?;
+    if session.created_at.elapsed() >= DEEP_JUNK_SESSION_TTL {
+        return Err("深度扫描结果已过期，请重新扫描".to_string());
+    }
+
+    let requested_names = category_names.iter().collect::<HashSet<_>>();
+    let excluded = excluded_paths
+        .iter()
+        .map(|path| path.to_lowercase())
+        .collect::<HashSet<_>>();
+    let mut matched_names = HashSet::new();
+    let mut paths = Vec::new();
+
+    for category in &session.result.categories {
+        if !requested_names.contains(&category.display_name) {
+            continue;
+        }
+        matched_names.insert(category.display_name.clone());
+        paths.extend(
+            category
+                .files
+                .iter()
+                .filter(|file| !excluded.contains(&file.path.to_lowercase()))
+                .map(|file| file.path.clone()),
+        );
+    }
+
+    if matched_names.len() != requested_names.len() {
+        return Err("深度扫描分类已变化，请重新扫描后再清理".to_string());
+    }
+    Ok(paths)
+}
+
 fn page_result(
     result: &DeepJunkScanResult,
     offset: usize,
@@ -705,6 +749,11 @@ fn match_deep_junk_category(path: &str) -> Option<JunkCategory> {
     if is_browser_cache(&normalized) {
         return Some(JunkCategory::BrowserCache);
     }
+    if is_user_profile_cache(&normalized) {
+        // 第三方应用通常把可重建缓存放在用户配置目录下；仅匹配明确的缓存目录名，
+        // 不把整个 AppData 当作垃圾，也不触碰 MSIX/WebView 持久化数据。
+        return Some(JunkCategory::AppCache);
+    }
     if contains_any(
         &normalized,
         &["\\windows\\softwaredistribution\\download\\"],
@@ -830,6 +879,46 @@ fn is_browser_cache(path: &str) -> bool {
         )
 }
 
+fn is_user_profile_cache(path: &str) -> bool {
+    if path.contains("\\appdata\\local\\packages\\") {
+        return false;
+    }
+
+    let profile_markers = [
+        "\\appdata\\local\\",
+        "\\appdata\\locallow\\",
+        "\\appdata\\roaming\\",
+    ];
+    let Some(profile_marker) = profile_markers
+        .iter()
+        .find(|marker| path.contains(**marker))
+    else {
+        return false;
+    };
+    let Some(profile_path) = path.split_once(profile_marker).map(|(_, suffix)| suffix) else {
+        return false;
+    };
+    let segments = profile_path.split('\\').collect::<Vec<_>>();
+    let cache_names = [
+        "cache",
+        "caches",
+        "code cache",
+        "gpucache",
+        "shadercache",
+        "d3dscache",
+        "crashdumps",
+    ];
+
+    segments
+        .iter()
+        .take(segments.len().saturating_sub(1))
+        .any(|segment| {
+            cache_names
+                .iter()
+                .any(|name| segment.eq_ignore_ascii_case(name))
+        })
+}
+
 fn is_thumbnail_cache(path: &str) -> bool {
     if !path.contains("\\appdata\\local\\microsoft\\windows\\explorer\\") {
         return false;
@@ -857,7 +946,10 @@ fn is_windows_log(path: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{create_session, get_category_page, is_deep_junk_path, DeepJunkScanResult};
+    use super::{
+        create_session, get_category_page, get_paths_for_categories, is_deep_junk_path,
+        DeepJunkScanResult,
+    };
     use crate::scanner::{CategoryScanResult, FileInfo, JunkCategory};
 
     #[test]
@@ -868,12 +960,28 @@ mod tests {
         assert!(is_deep_junk_path(
             r"E:\Google\Chrome\User Data\Default\Cache\data_1"
         ));
+        assert!(is_deep_junk_path(
+            r"D:\Users\Alice\AppData\Local\SomeTool\Cache\data_1"
+        ));
         assert!(is_deep_junk_path(r"D:\Windows\Prefetch\OLD.PF"));
         assert!(!is_deep_junk_path(r"D:\Users\Alice\Downloads\old.tmp"));
         assert!(!is_deep_junk_path(
             r"D:\Users\Alice\AppData\Local\Packages\App\EBWebView\Default\Cache\data"
         ));
         assert!(!is_deep_junk_path(r"D:\$Recycle.Bin\S-1-5-21\$R123"));
+    }
+
+    #[test]
+    fn keeps_persistent_profile_data_out_of_relaxed_cache_rules() {
+        assert!(is_deep_junk_path(
+            r"D:\Users\Alice\AppData\Roaming\SomeTool\Caches\old.bin"
+        ));
+        assert!(!is_deep_junk_path(
+            r"D:\Users\Alice\AppData\Roaming\SomeTool\Local Storage\leveldb\data"
+        ));
+        assert!(!is_deep_junk_path(
+            r"D:\Users\Alice\AppData\Local\Packages\Some.App\LocalCache\Cache\data"
+        ));
     }
 
     #[test]
@@ -916,5 +1024,14 @@ mod tests {
             .expect("获取深度扫描第二页");
         assert_eq!(second_page.files.len(), 1);
         assert!(!second_page.has_more);
+
+        let category_names = vec!["Windows临时文件".to_string()];
+        let excluded_paths = vec![first_page.categories[0].files[0].path.clone()];
+        let full_paths =
+            get_paths_for_categories(&first_page.scan_id, &category_names, &excluded_paths)
+                .expect("恢复未分页的完整分类路径");
+        // 后端应返回整类 501 个文件，并正确排除前端明确取消的 1 个路径。
+        assert_eq!(full_paths.len(), 500);
+        assert!(full_paths.iter().any(|path| path.ends_with("500.tmp")));
     }
 }
