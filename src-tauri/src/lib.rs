@@ -172,6 +172,7 @@ pub fn run() {
             restore_shell_icon,
             restart_explorer,
             open_shell_icon_backup_dir,
+            open_shell_icon_log,
             open_shell_icon_registry,
         ])
         .run(context)

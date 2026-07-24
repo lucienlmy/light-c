@@ -7,8 +7,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertTriangle,
   CheckCircle2,
+  FileText,
   FolderOpen,
   HardDriveDownload,
   Loader2,
@@ -23,6 +23,7 @@ import { EmptyState } from '../EmptyState';
 import { useToast } from '../Toast';
 import {
   openShellIconBackupDir,
+  openShellIconLog,
   openShellIconRegistry,
   removeShellIcon,
   restartExplorer,
@@ -179,14 +180,6 @@ export function ShellIconModule({ layoutMode = 'cards', isPageActive = true }: M
         titleExtra={<span className="rounded-full bg-orange-500/10 px-2 py-1 text-[10px] font-medium text-orange-600 dark:text-orange-400">需谨慎操作</span>}
       >
         <div className="space-y-4 p-5">
-          <div className="flex items-start gap-3 rounded-xl border border-orange-300 bg-orange-50 p-4 text-xs text-orange-700 dark:border-orange-800 dark:bg-orange-950/40 dark:text-orange-300">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-            <div>
-              <p className="font-semibold">安全边界</p>
-            <p className="mt-1 leading-relaxed">只展示能确认关联到第三方应用的 MyComputer\NameSpace 节点。系统白名单、Windows/Microsoft 组件、内部 RegFolder 节点和未知归属项会直接过滤。清理默认启用防复活，但管理员、SYSTEM 或 TrustedInstaller 仍可能绕过。</p>
-            </div>
-          </div>
-
           {!entries && moduleState.status === 'idle' && <EmptyState icon={HardDriveDownload} title="尚未扫描外壳挂载" description="扫描后会列出此电脑中的第三方外壳图标，并显示 CLSID、关联组件和安全状态。" />}
           {moduleState.status === 'scanning' && !entries && <div className="flex min-h-[160px] flex-col items-center justify-center gap-2 text-sm text-[var(--text-muted)]"><Loader2 className="h-7 w-7 animate-spin text-[var(--brand-green)]" /><span>正在读取 Explorer 外壳节点...</span></div>}
 
@@ -201,7 +194,8 @@ export function ShellIconModule({ layoutMode = 'cards', isPageActive = true }: M
                 <div className="flex flex-wrap gap-2 text-xs text-[var(--text-muted)]"><span className="inline-flex items-center gap-1"><Shield className="h-3.5 w-3.5 text-[var(--color-warning)]" />系统保护节点不会被操作</span><span className="inline-flex items-center gap-1"><CheckCircle2 className="h-3.5 w-3.5 text-[var(--brand-green)]" />操作前自动备份</span></div>
                 <div className="flex gap-2">
                   <button type="button" disabled={isOpeningBackup} onClick={() => { setIsOpeningBackup(true); void openShellIconBackupDir().catch(error => showToast({ type: 'error', title: '打开备份目录失败', description: String(error) })).finally(() => setIsOpeningBackup(false)); }} className="inline-flex items-center gap-1 rounded-lg border border-[var(--border-color)] px-2.5 py-1.5 text-xs text-[var(--text-muted)] hover:bg-[var(--bg-hover)] disabled:opacity-50"><FolderOpen className="h-3.5 w-3.5" />备份目录</button>
-                  <button type="button" onClick={() => void restartExplorer().then(() => showToast({ type: 'success', title: 'Explorer 已刷新', description: '此电脑中的外壳图标应已更新。' })).catch(error => showToast({ type: 'error', title: '刷新 Explorer 失败', description: String(error) }))} className="inline-flex items-center gap-1 rounded-lg border border-[var(--brand-green-20)] px-2.5 py-1.5 text-xs text-[var(--brand-green)] hover:bg-[var(--brand-green-10)]"><RefreshCw className="h-3.5 w-3.5" />刷新 Explorer</button>
+                  <button type="button" onClick={() => void openShellIconLog().catch(error => showToast({ type: 'error', title: '打开操作记录失败', description: String(error) }))} className="inline-flex items-center gap-1 rounded-lg border border-[var(--border-color)] px-2.5 py-1.5 text-xs text-[var(--text-muted)] hover:bg-[var(--bg-hover)]"><FileText className="h-3.5 w-3.5" />操作记录</button>
+                  <button type="button" onClick={() => void restartExplorer().then(() => showToast({ type: 'success', title: '外壳已刷新', description: '已通知 Explorer 重新读取外壳节点，不会重启任务栏进程。' })).catch(error => showToast({ type: 'error', title: '刷新外壳失败', description: String(error) }))} className="inline-flex items-center gap-1 rounded-lg border border-[var(--brand-green-20)] px-2.5 py-1.5 text-xs text-[var(--brand-green)] hover:bg-[var(--brand-green-10)]"><RefreshCw className="h-3.5 w-3.5" />刷新外壳</button>
                 </div>
               </div>
               {entries.length === 0 ? <EmptyState icon={CheckCircle2} title="未发现第三方外壳图标" description="当前此电脑中没有扫描到可展示的第三方 Namespace 节点。" tone="success" compact /> : <div className="space-y-2">{entries.map(entry => <ShellIconRow key={`${entry.hive}-${entry.registryView}-${entry.clsid}`} entry={entry} busy={busyTarget !== null} onAction={setPendingAction} onOpenRegistry={(target) => { void openShellIconRegistry(target).catch(error => showToast({ type: 'error', title: '定位注册表失败', description: String(error) })); }} />)}</div>}

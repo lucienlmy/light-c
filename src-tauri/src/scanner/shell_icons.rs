@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::ffi::{c_void, OsString};
 use std::fs;
+use std::io::Write;
 use std::os::windows::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -34,6 +35,13 @@ use winreg::{RegKey, HKEY};
 
 const NAMESPACE_PATH: &str =
     r"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace";
+const SHCNE_ASSOCCHANGED: u32 = 0x0800_0000;
+const SHCNF_IDLIST: u32 = 0x0000;
+
+#[link(name = "shell32")]
+extern "system" {
+    fn SHChangeNotify(event_id: u32, flags: u32, item1: *const c_void, item2: *const c_void);
+}
 const SYSTEM_CLSIDS: &[&str] = &[
     "{20D04FE0-3AEA-1069-A2D8-08002B30309D}",
     "{450D8FBA-AD25-11D0-98A6-006008059382}",
@@ -74,6 +82,17 @@ pub struct ShellIconOperationResult {
     pub message: String,
     pub backup_path: Option<String>,
     pub needs_explorer_refresh: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ShellIconOperationLog {
+    timestamp: String,
+    operation: String,
+    target: ShellIconTarget,
+    success: bool,
+    message: String,
+    backup_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -565,6 +584,73 @@ pub fn open_shell_icon_backup_dir() -> Result<(), String> {
     Ok(())
 }
 
+/// 打开独立的虚拟磁盘操作记录，避免用户只能依赖一次性的 Toast 回顾历史。
+pub fn open_shell_icon_log() -> Result<(), String> {
+    let path = shell_icon_log_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| format!("创建操作记录目录失败: {}", error))?;
+    }
+    if !path.exists() {
+        fs::write(&path, "").map_err(|error| format!("创建操作记录失败: {}", error))?;
+    }
+    // 直接打开日志内容比只定位文件更符合“操作记录”的预期，且不依赖资源管理器刷新状态。
+    Command::new("notepad.exe")
+        .arg(&path)
+        .spawn()
+        .map_err(|error| format!("打开操作记录失败: {}", error))?;
+    Ok(())
+}
+
+/// 记录虚拟磁盘操作结果；日志写入失败不影响注册表操作本身。
+pub fn record_shell_icon_operation(
+    target: &ShellIconTarget,
+    operation: &str,
+    result: &Result<ShellIconOperationResult, String>,
+) {
+    let (success, message, backup_path) = match result {
+        Ok(value) => (
+            value.success,
+            value.message.clone(),
+            value.backup_path.clone(),
+        ),
+        Err(error) => (false, error.clone(), None),
+    };
+    let entry = ShellIconOperationLog {
+        timestamp: Local::now().to_rfc3339(),
+        operation: operation.to_string(),
+        target: target.clone(),
+        success,
+        message,
+        backup_path,
+    };
+    let Ok(json) = serde_json::to_string(&entry) else {
+        log::warn!("序列化虚拟磁盘操作记录失败");
+        return;
+    };
+    let path = shell_icon_log_path();
+    let write_result = (|| -> Result<(), String> {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|error| format!("创建操作记录目录失败: {}", error))?;
+        }
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .map_err(|error| format!("打开操作记录失败: {}", error))?;
+        writeln!(file, "{}", json).map_err(|error| format!("写入操作记录失败: {}", error))
+    })();
+    if let Err(error) = write_result {
+        log::warn!("{}", error);
+    }
+}
+
+fn shell_icon_log_path() -> PathBuf {
+    crate::data_dir::get_data_dir()
+        .join("logs")
+        .join("shell_icons.log")
+}
+
 /// 将目标键写入 Regedit 的 LastKey 后打开注册表编辑器，避免用户手动复制长路径。
 pub fn open_shell_icon_registry(target: &ShellIconTarget) -> Result<(), String> {
     let target = normalize_target(target)?;
@@ -614,12 +700,15 @@ fn regedit_root_name(regedit_config: &RegKey) -> String {
 }
 
 pub fn restart_explorer() -> Result<(), String> {
-    // Explorer 重启会短暂隐藏桌面和任务栏，因此只提供显式按钮，不在每次清理后自动执行。
-    let status = hidden_command("taskkill", &["/f", "/im", "explorer.exe"])?;
-    if !status.status.success() && status.status.code() != Some(128) {
-        return Err("关闭 Explorer 失败，请稍后手动刷新资源管理器".to_string());
+    // 只发送 Shell 变更通知，不结束 explorer.exe，避免 TranslucentTB 等任务栏扩展丢失注入状态。
+    unsafe {
+        SHChangeNotify(
+            SHCNE_ASSOCCHANGED,
+            SHCNF_IDLIST,
+            std::ptr::null(),
+            std::ptr::null(),
+        );
     }
-    hidden_command("explorer.exe", &[])?;
     Ok(())
 }
 

@@ -1570,6 +1570,11 @@ export async function openShellIconBackupDir(): Promise<void> {
   return invoke<void>('open_shell_icon_backup_dir');
 }
 
+/** 打开虚拟磁盘操作记录，记录文件位于当前配置数据目录的 logs 下。 */
+export async function openShellIconLog(): Promise<void> {
+  return invoke<void>('open_shell_icon_log');
+}
+
 /** 通过注册表编辑器的 LastKey 定位到目标外壳节点。 */
 export async function openShellIconRegistry(target: ShellIconTarget): Promise<void> {
   return invoke<void>('open_shell_icon_registry', { target });
@@ -1611,7 +1616,8 @@ export interface ClearLocalDataResult {
 }
 
 /**
- * 娓呯┖鏈湴鏁版嵁锛堝畨瑁呭巻鍙茬紦瀛?+ 娓呯悊鏃ュ織锛? * @returns [鍒犻櫎鏂囦欢鏁? 閲婃斁瀛楄妭鏁癩
+ * 清空本地数据（安装历史缓存、清理日志、注册表备份和模块专属记录）。
+ * @returns [删除文件数, 释放字节数]
  */
 export async function clearLocalData(): Promise<[number, number]> {
   return invoke<[number, number]>('clear_local_data');
