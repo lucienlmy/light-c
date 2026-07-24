@@ -65,3 +65,16 @@ pub const PROTECTED_FILES: &[&str] = &[
 pub const PROTECTED_EXTENSIONS_IN_WINDOWS: &[&str] = &[
     "sys", "dll", "exe", "drv", "ocx", "cpl", "msi", "msp", "msu", "cat", "mum", "manifest",
 ];
+
+/// 判断是否为 Windows 清理向导明确允许重建的系统缓存子目录。
+/// 这些目录位于受保护的系统根目录下，因此删除引擎必须只放行精确子路径，不能放宽整个父目录。
+pub fn is_rebuildable_system_cache_path(path: &str) -> bool {
+    let normalized = path.replace('/', "\\").to_ascii_lowercase();
+    [
+        "\\windows\\system32\\d3d_cache",
+        "\\programdata\\microsoft\\windows defender\\localcopy",
+        "\\programdata\\microsoft\\windows defender\\support",
+    ]
+    .iter()
+    .any(|marker| normalized.contains(marker))
+}

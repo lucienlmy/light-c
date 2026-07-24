@@ -165,7 +165,7 @@ pub fn run() {
             // AI 资产分析
             scan_ai_model_assets,
             delete_ai_model,
-            // 虚拟磁盘管理
+            // 外壳图标清理
             scan_shell_icons,
             remove_shell_icon,
             unlock_shell_icon,

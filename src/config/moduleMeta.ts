@@ -53,9 +53,9 @@ export const APP_MODULE_META: AppModuleMeta[] = [
   { id: 'context-menu', label: '右键菜单清理', icon: MousePointerClick },
   { id: 'hotspot', label: '大目录分析', icon: Flame },
   { id: 'disk-growth', label: '磁盘变化分析', icon: HardDrive },
+  { id: 'shell-icons', label: '外壳图标管理', icon: HardDriveDownload },
   // AI 模型空间覆盖模型、LoRA、Embedding 和缓存，用“空间”强调这是占用分析而不是自动清理。
   { id: 'ai-models', label: 'AI 模型空间', icon: BrainCircuit },
-  { id: 'shell-icons', label: '虚拟磁盘管理', icon: HardDriveDownload },
 ];
 
 export const DEFAULT_ACTIVE_MODULE_ID: AppModuleId = 'junk-clean';

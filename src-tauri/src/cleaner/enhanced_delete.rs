@@ -433,6 +433,12 @@ const SAFE_OWNERSHIP_PATHS: &[&str] = &[
     "\\windows\\temp",
     "\\windows\\prefetch",
     "\\windows\\softwaredistribution\\download",
+    "\\windows\\softwaredistribution\\deliveryoptimization",
+    "\\windows\\serviceprofiles\\networkservice\\appdata\\local\\microsoft\\windows\\deliveryoptimization",
+    "\\programdata\\microsoft\\windows defender\\localcopy",
+    "\\programdata\\microsoft\\windows defender\\support",
+    "\\windows\\system32\\d3d_cache",
+    "\\appdata\\local\\d3dscache",
     "\\$recycle.bin",
 ];
 
@@ -913,12 +919,14 @@ impl EnhancedDeleteEngine {
 
     /// 检查是否为系统保护文件（使用共享安全常量，与 delete_engine 保持一致）
     fn is_system_protected(&self, path: &Path) -> bool {
-        use super::safety_constants::{PROTECTED_FILES, PROTECTED_PATH_PREFIXES};
+        use super::safety_constants::{
+            is_rebuildable_system_cache_path, PROTECTED_FILES, PROTECTED_PATH_PREFIXES,
+        };
 
         let path_str = path.to_string_lossy().to_lowercase();
 
         for prefix in PROTECTED_PATH_PREFIXES {
-            if path_str.starts_with(prefix) {
+            if path_str.starts_with(prefix) && !is_rebuildable_system_cache_path(&path_str) {
                 return true;
             }
         }

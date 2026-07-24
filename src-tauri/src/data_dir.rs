@@ -182,7 +182,7 @@ const CLEARABLE_DATA_DEFINITIONS: [ClearableDataDefinition; 6] = [
     ClearableDataDefinition {
         id: "shell_icon_backups",
         label: "虚拟磁盘注册表备份",
-        description: "虚拟磁盘管理操作前保存的注册表和权限备份，可用于恢复入口。",
+        description: "外壳图标清理操作前保存的注册表和权限备份，可用于恢复入口。",
         relative_path: "reg_backups/shell_icons",
         item_type: ClearableDataType::DirectoryContents,
         warning: Some("删除后无法再通过备份恢复已移除的虚拟磁盘入口。"),

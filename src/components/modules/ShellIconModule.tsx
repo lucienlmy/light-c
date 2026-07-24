@@ -1,6 +1,4 @@
 // ============================================================================
-// 虚拟磁盘管理 MVP
-//
 // 这里的“虚拟磁盘”是 Explorer 外壳命名空间图标，不是磁盘驱动器本身。
 // 后端负责重新校验 CLSID、Hive、视图和系统保护边界，前端只维护选择与交互状态。
 // ============================================================================
@@ -161,8 +159,8 @@ export function ShellIconModule({ layoutMode = 'cards', isPageActive = true }: M
     <>
       <ModuleCard
         id="shellIcons"
-        title="虚拟磁盘管理"
-        description="管理此电脑中的第三方外壳图标（如双击打开某网盘），支持备份、清理和防复活"
+        title="外壳图标清理"
+        description="清理此电脑中的第三方外壳图标（如某网盘、某PS等），支持备份、清理和防复活"
         icon={<HardDriveDownload className="h-6 w-6 text-[var(--brand-green)]" />}
         status={moduleState.status}
         fileCount={moduleState.fileCount}

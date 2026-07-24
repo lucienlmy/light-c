@@ -145,7 +145,7 @@ export function GuideSettings() {
           <div>
             <p className="text-sm font-medium text-[var(--text-primary)] mb-2 flex items-center gap-2">
               <HardDrive className="w-4 h-4 text-[var(--brand-green)]" />
-              虚拟磁盘管理
+              外壳图标清理
             </p>
             <p className="text-xs text-[var(--text-muted)] leading-relaxed pl-6">
               用于识别和清理部分网盘、办公软件、下载工具等第三方软件注册到“此电脑”中的虚拟磁盘入口。这些项目通常不是真实磁盘，而是软件添加的外壳图标；清理后不会删除网盘中的文件，只会移除资源管理器中的入口。

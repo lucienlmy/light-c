@@ -1512,7 +1512,7 @@ export async function deleteAiModel(path: string): Promise<EnhancedDeleteResult>
 }
 
 // ============================================================================
-// 虚拟磁盘管理 API
+// 外壳图标清理 API
 // ============================================================================
 
 export interface ShellIconInfo {
